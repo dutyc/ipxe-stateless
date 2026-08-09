@@ -1,0 +1,27 @@
+#!ipxe
+
+# 自动网络引导脚本（EMBED）
+#
+# 用法：
+#   BIOS:  GRUB2  linux16 /boot/ipxe.lkrn
+#   UEFI:  GRUB2  chainloader /EFI/ipxe/ipxe.efi
+#          （或 UEFI 固件直接引导 ipxe.efi）
+#
+# 引导链：DHCP -> tftp://${next-server}/boot.ipxe
+#         -> boot.ipxe.cfg（变量 + 控制面 /boot-vars）
+#         -> menu.ipxe -> sanboot
+
+# 获取网络配置（next-server 由 DHCP 提供，同机部署时即控制面 IP）
+dhcp || goto failed
+
+# 进入第一代引导链
+chain --autofree tftp://${next-server}/boot.ipxe || goto failed
+
+# 引导链正常返回（如菜单选择 exit）时退出
+exit
+
+:failed
+echo
+echo *** Network boot failed: dropping to iPXE shell ***
+echo
+shell

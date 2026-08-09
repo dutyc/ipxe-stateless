@@ -1,0 +1,15 @@
+diff --git a/src/Makefile b/src/Makefile
+--- a/src/Makefile
++++ b/src/Makefile
+@@ -246,7 +246,11 @@
+ # All drivers (defined on a per-platform basis)
+ #
+ DRIVERS_ipxe	+=
+ 
++# Debug builds use the same driver set as the main build
++#
++DRIVERS_ipxe-debug	+= $(DRIVERS_ipxe)
++
+ # All drivers (excluding USB network devices)
+ #
+ DRIVERS_ipxe-legacy = $(filter-out $(DRIVERS_usb_net),$(DRIVERS_ipxe))
