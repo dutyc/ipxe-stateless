@@ -1,4 +1,4 @@
-# ipxe-stateless
+# iPXE-Stateless
 
 **无状态云原生 iPXE** —— 基于**上游 iPXE + 补丁（Patch）机制**的自动化固件构建仓库。
 
@@ -22,10 +22,46 @@ patches/（差异文件，唯一事实来源）
     +
 embed/（脚本资产）
     ↓ build/build.sh
-dist/（五类固件 + SHA256SUMS）
+dist/（六类固件 + SHA256SUMS）
 ```
 
 补丁全部基于**固定上游基线**生成，升级上游时重新生成补丁即可（见 [patches/README.md](patches/README.md)）。
+
+## 定制内容
+
+相对上游 iPXE 基线（默认 `e6e51ccb`）的全部修改，共三个补丁：
+
+### 1. RTL8125 全系适配（`0001`）
+
+- **背景**：RTL8125（2.5G）网卡必须由 iPXE native 驱动接管——固件 SNP 驱动在 iSCSI 挂载场景存在挂起缺陷，无法用于无盘引导；而上游 iPXE 对部分 8125 版本（XID 0x688 系列）支持不完整。
+- **修改**：`src/drivers/net/realtek.c`、`realtek.h`
+  - XID 0x688 版本表与设备识别
+  - EPHY 初始化表（2.5G PHY 配置）
+  - 32 位中断状态寄存器
+  - FETCH/PAUSE_SLOT 配置
+  - BAR 0x4808（2.5G 专用寄存器窗口）
+  - TPPOLL_8125 轮询方式
+
+### 2. debug 构建修复（`0002`）
+
+- **背景**：`ipxe-debug.efi` 目标未定义驱动集，构建产物为空壳（无任何网卡驱动），无法用于故障定位。
+- **修改**：`src/Makefile` 新增 `DRIVERS_ipxe-debug += $(DRIVERS_ipxe)`，debug 目标继承全驱动集。
+
+### 3. snponly 本地引导支持（`0003`）
+
+- **背景**：官方 `snponly.efi` 仅支持固件 PXE 链加载场景（只接管加载 iPXE 的那个设备）；从本地 UEFI（U 盘/磁盘）引导时找不到任何网卡，直接进入 shell。
+- **修改**：`src/drivers/net/efi/snponly.c`——链加载定位失败时回退接管全部 SNP/NII/MNP 设备；PXE 链加载场景行为不变。
+- **作用**：native 驱动不可用（如特定主板 RTL8168 初始化挂起）的机器，本地引导也有 SNP 兜底路径。
+
+## 上游依赖与许可
+
+本仓库的固件构建与定制基于两个上游项目：
+
+- **iPXE**（[github.com/ipxe/ipxe](https://github.com/ipxe/ipxe)，GPL-2.0-or-later / UBDL 双许可）——固件基础源码。本仓库不包含其源码，仅以补丁形式维护对其的全部修改；补丁基于固定基线 `e6e51ccb` 生成，升级上游时重新生成（见 [patches/README.md](patches/README.md)）。
+
+- **Linux 内核 r8169 驱动**（`drivers/net/ethernet/realtek/r8169_main.c`，GPL-2.0）——`0001` 补丁中 RTL8125 适配（XID 版本表、EPHY 初始化、电源管理等）的寄存器级参考实现，原生驱动行为与 Linux 对齐。
+
+本仓库整体遵循 **GPL-2.0**（见 [LICENSE](LICENSE)），覆盖对上游 iPXE 的全部修改（含参考 Linux 内核代码的部分），与上游 GPL-2.0-or-later 及 Linux 内核 GPL-2.0 许可兼容。
 
 ## 目录结构
 
@@ -82,9 +118,3 @@ UPSTREAM_URL=<镜像地址> ./build/build.sh # 更换源码源
 
 - Linux + `git` / `make` / `gcc`（iPXE x86_64 构建工具链）
 - 网络可访问上游仓库（默认 GitHub，可换镜像）
-
-## 与现有工作区的关系
-
-- ipxe-stateless 是 iPXE 固件源码与构建的**唯一维护点**（旧工作区 ipxe/ 已删除，不再存在）
-- 源码修改一律通过 patches/ 补丁机制：改补丁 → 重新生成 → 构建（禁止直接改 .cache/ 工作树）
-- 部署侧说明见 `ipxe-all-ready/` 文档（引导介质制作、控制面等）
