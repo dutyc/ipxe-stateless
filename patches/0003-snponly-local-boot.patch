@@ -1,0 +1,22 @@
+diff --git a/src/drivers/net/efi/snponly.c b/src/drivers/net/efi/snponly.c
+index b7231ce01..0af409ae9 100644
+--- a/src/drivers/net/efi/snponly.c
++++ b/src/drivers/net/efi/snponly.c
+@@ -164,6 +164,17 @@ static int chained_supported ( EFI_HANDLE device,
+ 		return rc;
+ 	}
+ 
++	/* If we were not chainloaded from a device supporting this
++	 * protocol (e.g. when booting locally from a disk), then
++	 * accept any device providing the protocol
++	 */
++	if ( ! chained->device ) {
++		DBGC ( device, "CHAINED %s is a local %s device\n",
++		       efi_handle_name ( device ),
++		       efi_guid_ntoa ( chained->protocol ) );
++		return 0;
++	}
++
+ 	/* Ignore non-matching handles */
+ 	if ( device != chained->device ) {
+ 		DBGC2 ( device, "CHAINED %s is not the chainloaded %s\n",

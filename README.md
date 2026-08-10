@@ -59,6 +59,7 @@ UPSTREAM_URL=<镜像地址> ./build/build.sh # 更换源码源
 | `dist/pxe-uefi/ipxe.efi` | PXE 网络启动（UEFI） | 无 EMBED，脚本由 DHCP 下发 |
 | `dist/direct-uefi/ipxe.efi` | UEFI 直接引导（含 EMBED） | 内置 auto.ipxe，启动即走引导链 |
 | `dist/direct-uefi/ipxe-debug.efi` | 同上（debug 版） | `DEBUG=realtek:3`，故障定位用 |
+| `dist/direct-uefi/snponly.efi` | UEFI 直接引导（SNP 专用，含 EMBED） | 无 native 驱动，用固件 SNP 协议；固件 PXE 链加载时仅接管链加载设备，本地引导（U 盘/磁盘）时回退接管全部 SNP 设备，native 驱动不可用的机器兜底 |
 | `dist/grub-bios/ipxe.lkrn` | GRUB2 BIOS 引导（含 EMBED） | `linux16 /ipxe.lkrn` |
 | `dist/usb/ipxe.usb` | BIOS 引导介质（含 EMBED） | 整盘写入 U 盘 |
 
@@ -81,5 +82,6 @@ UPSTREAM_URL=<镜像地址> ./build/build.sh # 更换源码源
 
 ## 与现有工作区的关系
 
-- 旧工作区 `ipxe/`（含源码与行尾噪声）仅作为补丁来源的参照，不再承担构建职责
+- ipxe-ferry 是 iPXE 固件源码与构建的**唯一维护点**（旧工作区 ipxe/ 已删除，不再存在）
+- 源码修改一律通过 patches/ 补丁机制：改补丁 → 重新生成 → 构建（禁止直接改 .cache/ 工作树）
 - 部署侧说明见 `ipxe-all-ready/` 文档（引导介质制作、控制面等）

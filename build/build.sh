@@ -30,6 +30,7 @@ BUILD_TARGETS=(
   "pxe-uefi/ipxe.efi|bin-x86_64-efi/ipxe.efi|"
   "direct-uefi/ipxe.efi|bin-x86_64-efi/ipxe.efi|EMBED=embed/auto.ipxe"
   "direct-uefi/ipxe-debug.efi|bin-x86_64-efi/ipxe-debug.efi|EMBED=embed/auto.ipxe DEBUG=realtek:3"
+  "direct-uefi/snponly.efi|bin-x86_64-efi/snponly.efi|EMBED=embed/auto.ipxe"
   "grub-bios/ipxe.lkrn|bin/ipxe.lkrn|EMBED=embed/auto.ipxe"
   "usb/ipxe.usb|bin/ipxe.usb|EMBED=embed/auto.ipxe"
 )
@@ -66,7 +67,8 @@ fetch_source() {
     git -C "${SRC_DIR}" checkout --force "${UPSTREAM_COMMIT}" \
         || die "无法检出基线 ${UPSTREAM_COMMIT}（本地源缺少该提交？）"
   else
-    git -C "${SRC_DIR}" fetch --depth 1 origin "${UPSTREAM_COMMIT}" \
+    # 直接以 UPSTREAM_URL 取基线，不依赖缓存 origin（origin 可能已失效）
+    git -C "${SRC_DIR}" fetch --depth 1 "${UPSTREAM_URL}" "${UPSTREAM_COMMIT}" \
         || die "无法获取基线 ${UPSTREAM_COMMIT}（上游已重写历史？）"
     git -C "${SRC_DIR}" checkout --force "FETCH_HEAD"
   fi
