@@ -1,6 +1,8 @@
-# ipxe-ferry
+# ipxe-stateless
 
-基于**上游 iPXE + 补丁（Patch）机制**的自动化固件构建仓库。
+**无状态云原生 iPXE** —— 基于**上游 iPXE + 补丁（Patch）机制**的自动化固件构建仓库。
+
+定位：为无状态（Stateless）云原生环境提供统一引导固件——客户端不保存任何状态，启动即通过 DHCP 获取配置、链式加载引导脚本、无盘进入系统。固件自身亦无状态：仓库不直接包含 iPXE 源码，仅维护差异补丁与构建资产，可随时基于新基线重建。
 
 本仓库**不包含 iPXE 源码**，只保存：
 
@@ -28,10 +30,11 @@ dist/（五类固件 + SHA256SUMS）
 ## 目录结构
 
 ```
-ipxe-ferry/
+ipxe-stateless/
 ├── patches/                 # 源码补丁集（按编号顺序应用）
 │   ├── 0001-realtek-8125-adaptation.patch
-│   └── 0002-makefile-ipxe-debug.patch
+│   ├── 0002-makefile-ipxe-debug.patch
+│   └── 0003-snponly-local-boot.patch
 ├── embed/
 │   └── auto.ipxe            # EMBED 自动引导脚本
 ├── build/
@@ -82,6 +85,6 @@ UPSTREAM_URL=<镜像地址> ./build/build.sh # 更换源码源
 
 ## 与现有工作区的关系
 
-- ipxe-ferry 是 iPXE 固件源码与构建的**唯一维护点**（旧工作区 ipxe/ 已删除，不再存在）
+- ipxe-stateless 是 iPXE 固件源码与构建的**唯一维护点**（旧工作区 ipxe/ 已删除，不再存在）
 - 源码修改一律通过 patches/ 补丁机制：改补丁 → 重新生成 → 构建（禁止直接改 .cache/ 工作树）
 - 部署侧说明见 `ipxe-all-ready/` 文档（引导介质制作、控制面等）

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# ipxe-ferry 自动化构建流水线
+# ipxe-stateless 自动化构建流水线
 #
 # 流程：获取上游源码（固定基线）-> 应用补丁 -> 嵌入脚本 -> 构建 -> 归档
 #
@@ -35,8 +35,8 @@ BUILD_TARGETS=(
   "usb/ipxe.usb|bin/ipxe.usb|EMBED=embed/auto.ipxe"
 )
 
-log() { echo -e "\033[1;32m[ferry]\033[0m $*"; }
-die() { echo -e "\033[1;31m[ferry]\033[0m ERROR: $*" >&2; exit 1; }
+log() { echo -e "\033[1;32m[stateless]\033[0m $*"; }
+die() { echo -e "\033[1;31m[stateless]\033[0m ERROR: $*" >&2; exit 1; }
 
 command -v git  >/dev/null || die "缺少 git"
 command -v make >/dev/null || die "缺少 make"
