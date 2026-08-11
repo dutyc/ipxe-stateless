@@ -63,6 +63,8 @@ dist/（六类固件 + SHA256SUMS）
 
 本仓库整体遵循 **GPL-2.0**（见 [LICENSE](LICENSE)），覆盖对上游 iPXE 的全部修改（含参考 Linux 内核代码的部分），与上游 GPL-2.0-or-later 及 Linux 内核 GPL-2.0 许可兼容。
 
+补丁应用后的完整源码快照见 [reference/](reference/)（含 `0001` 的 realtek.c 与 `0003` 的 snponly.c），便于直接阅读修改内容；构建不直接使用该目录，仍由 `build.sh` 从上游基线 + 补丁现场生成，升级补丁时须同步更新快照。
+
 ## 目录结构
 
 ```
@@ -75,6 +77,10 @@ ipxe-stateless/
 │   └── auto.ipxe            # EMBED 自动引导脚本
 ├── build/
 │   └── build.sh             # 自动化构建流水线
+├── reference/               # 补丁应用后的参考源码快照（构建不使用）
+│   └── src/drivers/net/
+│       ├── realtek.c        # 0001 应用后：含 RTL8125 全系适配
+│       └── efi/snponly.c    # 0003 应用后：snponly 本地引导支持
 ├── dist/                    # 构建产物（.gitignore）
 └── README.md
 ```
