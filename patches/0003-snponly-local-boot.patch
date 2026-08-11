@@ -1,3 +1,11 @@
+# ipxe-stateless 0003: snponly 本地引导支持
+#
+# Copyright (C) 2026 LECREATE <3302354366@qq.com>
+# SPDX-License-Identifier: GPL-2.0
+#
+# 对 iPXE src/drivers/net/efi/snponly.c 的修改继承上游许可
+# （GPL-2.0-or-later / UBDL）。
+
 diff --git a/src/drivers/net/efi/snponly.c b/src/drivers/net/efi/snponly.c
 index b7231ce01..0af409ae9 100644
 --- a/src/drivers/net/efi/snponly.c

@@ -61,7 +61,7 @@ dist/（六类固件 + SHA256SUMS）
 
 - **Linux 内核 r8169 驱动**（`drivers/net/ethernet/realtek/r8169_main.c`，GPL-2.0）——`0001` 补丁中 RTL8125 适配（XID 版本表、EPHY 初始化、电源管理等）的寄存器级参考实现，原生驱动行为与 Linux 对齐。
 
-本仓库整体遵循 **GPL-2.0**（见 [LICENSE](LICENSE)），覆盖对上游 iPXE 的全部修改（含参考 Linux 内核代码的部分），与上游 GPL-2.0-or-later 及 Linux 内核 GPL-2.0 许可兼容。
+本仓库整体遵循 **GPL-2.0**（见 [LICENSE](LICENSE)），覆盖对上游 iPXE 的全部修改（含参考 Linux 内核代码的部分），与上游 GPL-2.0-or-later 及 Linux 内核 GPL-2.0 许可兼容。其中参考 Linux 内核的 8125 适配部分**仅按 GPL-2.0 授权**，不得以 UBDL 或更高版本许可再分发。
 
 补丁应用后的完整源码快照见 [reference/](reference/)（含 `0001` 的 realtek.c 与 `0003` 的 snponly.c），便于直接阅读修改内容；构建不直接使用该目录，仍由 `build.sh` 从上游基线 + 补丁现场生成，升级补丁时须同步更新快照。
 

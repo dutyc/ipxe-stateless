@@ -1,3 +1,10 @@
+# ipxe-stateless 0002: debug 构建修复
+#
+# Copyright (C) 2026 LECREATE <3302354366@qq.com>
+# SPDX-License-Identifier: GPL-2.0
+#
+# 对 iPXE src/Makefile 的修改继承上游许可（GPL-2.0-or-later / UBDL）。
+
 diff --git a/src/Makefile b/src/Makefile
 --- a/src/Makefile
 +++ b/src/Makefile
