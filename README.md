@@ -11,33 +11,17 @@
 - `build/` —— 自动化构建流水线
 - `dist/` —— 构建产物（不入库，由流水线生成）
 
-## 设计动机
-
-定制源于两类需求：
-
-**业务动机**——部分主板**没有 PXE 网络启动选项，或设置繁琐**（BIOS 无 Network Boot 入口、默认关闭 UEFI 网络栈、需逐台进 BIOS 配置且 Secure Boot 限制多）。为绕开主板 PXE 支持，提供可经本地介质（USB / 磁盘 / GRUB2 链加载）引导、启动即自动进入网络引导流程的定制固件：`embed/auto.ipxe`（EMBED 定制）与 `0003`（SNP 固件本地引导适配）即为此服务。
-
-**维护动机**——对 iPXE 源码的修改以**直接 fork 分支**维护的成本太高（上游升级需持续合并）。本仓库改为：
-
-```
-上游 ipxe 源码（固定基线 commit）
-    +
-patches/（差异文件，唯一事实来源）
-    +
-embed/（脚本资产）
-    ↓ build/build.sh
-dist/（六类固件 + SHA256SUMS）
-```
-
-补丁全部基于**固定上游基线**生成，升级上游时重新生成补丁即可（见 [patches/README.md](patches/README.md)）。
-
 ## 定制内容
 
-相对上游 iPXE 基线（默认 `e6e51ccb`）的全部修改（三个补丁 + EMBED 构建级定制），详见 [docs/customizations.md](docs/customizations.md)：
+设计动机与全部修改（三个补丁 + EMBED 构建级定制）详见 [docs/customizations.md](docs/customizations.md)：
 
 - `0001` — RTL8125 全系适配（native 驱动）
 - `0002` — debug 构建修复
 - `0003` — snponly 本地引导支持
+
+## 网卡支持
+
+常见网卡在本仓库固件（上游 iPXE 基线 + 定制补丁）下的支持情况（覆盖良好 / 不支持 / 有条件三类 + 实测记录）见 [docs/network-support.md](docs/network-support.md)。
 
 ## 上游依赖与许可
 
@@ -64,7 +48,8 @@ ipxe-stateless/
 ├── build/
 │   └── build.sh             # 自动化构建流水线
 ├── docs/
-│   ├── customizations.md    # 定制内容详解（三个补丁 + EMBED）
+│   ├── customizations.md    # 设计动机与定制内容详解
+│   ├── network-support.md   # 网卡支持矩阵（覆盖/风险/实测）
 │   └── 8168-research-log.md # RTL8168 研究记录
 ├── reference/               # 补丁应用后的参考源码快照（构建不使用）
 │   └── src/drivers/net/
