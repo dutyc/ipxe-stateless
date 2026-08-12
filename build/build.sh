@@ -28,10 +28,14 @@ JOBS="${JOBS:-$(nproc)}"
 # 同名目标（bin-x86_64-efi/ipxe.efi）受 EMBED 参数影响，构建前强制删除目标以保证参数生效
 BUILD_TARGETS=(
   "pxe-uefi/ipxe.efi|bin-x86_64-efi/ipxe.efi|"
+  "pxe-uefi/ipxe-debug.efi|bin-x86_64-efi/ipxe-debug.efi|DEBUG=realtek:3"
+  "pxe-uefi/snponly.efi|bin-x86_64-efi/snponly.efi|"
+  "pxe-uefi/snponly-debug.efi|bin-x86_64-efi/snponly-debug.efi|DEBUG=realtek:3"
   "direct-uefi/ipxe.efi|bin-x86_64-efi/ipxe.efi|EMBED=embed/auto.ipxe"
   "direct-uefi/ipxe-debug.efi|bin-x86_64-efi/ipxe-debug.efi|EMBED=embed/auto.ipxe DEBUG=realtek:3"
   "direct-uefi/snponly.efi|bin-x86_64-efi/snponly.efi|EMBED=embed/auto.ipxe"
   "grub-bios/ipxe.lkrn|bin/ipxe.lkrn|EMBED=embed/auto.ipxe"
+  "undionly.kpxe|bin/undionly.kpxe|"
   "usb/ipxe.usb|bin/ipxe.usb|EMBED=embed/auto.ipxe"
 )
 

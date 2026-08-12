@@ -76,10 +76,14 @@ UPSTREAM_URL=<镜像地址> ./build/build.sh # 更换源码源
 | 产物 | 目标形态 | 说明 |
 |---|---|---|
 | `dist/pxe-uefi/ipxe.efi` | PXE 网络启动（UEFI） | 无 EMBED，脚本由 DHCP 下发 |
+| `dist/pxe-uefi/ipxe-debug.efi` | 同上（debug 版） | `DEBUG=realtek:3`，故障定位用 |
+| `dist/pxe-uefi/snponly.efi` | PXE 网络启动（SNP 专用） | 无 EMBED；固件 PXE 链加载时仅接管链加载设备，定位失败时回退接管全部 SNP 设备 |
+| `dist/pxe-uefi/snponly-debug.efi` | 同上（debug 版） | `DEBUG=realtek:3`，故障定位用 |
 | `dist/direct-uefi/ipxe.efi` | UEFI 直接引导（含 EMBED） | 内置 auto.ipxe，启动即走引导链 |
 | `dist/direct-uefi/ipxe-debug.efi` | 同上（debug 版） | `DEBUG=realtek:3`，故障定位用 |
 | `dist/direct-uefi/snponly.efi` | UEFI 直接引导（SNP 专用，含 EMBED） | 无 native 驱动，用固件 SNP 协议；固件 PXE 链加载时仅接管链加载设备，本地引导（U 盘/磁盘）时回退接管全部 SNP 设备，native 驱动不可用的机器兜底 |
 | `dist/grub-bios/ipxe.lkrn` | GRUB2 BIOS 引导（含 EMBED） | `linux16 /ipxe.lkrn` |
+| `dist/undionly.kpxe` | PXE 网络启动（BIOS） | 无 EMBED，脚本由 DHCP 下发；无 native 驱动，经网卡 ROM 的 UNDI 接口收发；兼容一切带 PXE ROM 的网卡 |
 | `dist/usb/ipxe.usb` | BIOS 引导介质（含 EMBED） | 整盘写入 U 盘 |
 
 `dist/SHA256SUMS` 为全部产物的 sha256 校验清单。
