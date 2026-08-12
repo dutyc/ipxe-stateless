@@ -1,58 +1,62 @@
-# 补丁集说明
+# Patch Set
 
-所有补丁基于**同一上游基线**生成，应用顺序 = 文件名顺序。
+[English](README.md) | [中文](README.zh-CN.md)
 
-## 基线
+All patches are generated against the **same upstream baseline**; apply order = filename order.
 
-- 上游仓库：`https://github.com/ipxe/ipxe.git`（国内可换 `https://gitee.com/mirrors/ipxe.git`）
-- 基线提交：`e6e51ccbf17ff40a899c8859fb4e95abd5cfcd57`（master）
-- 重新生成补丁时，在构建缓存工作树（`.cache/ipxe-upstream`，已含补丁与修改）中：
+## Baseline
+
+- Upstream repository: `https://github.com/ipxe/ipxe.git` (mirror available: `https://gitee.com/mirrors/ipxe.git`)
+- Baseline commit: `e6e51ccbf17ff40a899c8859fb4e95abd5cfcd57` (master)
+- To regenerate patches, in the build cache worktree (`.cache/ipxe-upstream`, which already contains the patches and modifications):
 
   ```bash
   git -C .cache/ipxe-upstream diff > patches/NNNN-xxx.patch
   ```
 
-## 补丁清单
+## Patch List
 
-| 补丁 | 修改文件 | 内容 |
+| Patch | Files | Content |
 |---|---|---|
-| `0001-realtek-8125-adaptation.patch` | `src/drivers/net/realtek.c`、`realtek.h` | RTL8125 全系适配（XID 0x688 版本表、EPHY 初始化表、32 位中断寄存器、FETCH/PAUSE_SLOT、BAR 0x4808、TPPOLL_8125） |
-| `0002-makefile-ipxe-debug.patch` | `src/Makefile` | 新增 `DRIVERS_ipxe-debug` 定义（debug 目标继承全驱动集，修复 `obj_ipxe_debug` 链接失败） |
-| `0003-snponly-local-boot.patch` | `src/drivers/net/efi/snponly.c` | snponly 本地引导支持：链加载定位失败时（本地 UEFI 引导）回退接管全部 SNP/NII/MNP 设备，PXE 链加载场景行为不变 |
+| `0001-realtek-8125-adaptation.patch` | `src/drivers/net/realtek.c`, `realtek.h` | RTL8125 series adaptation (XID 0x688 version table, EPHY initialisation table, 32-bit interrupt register, FETCH/PAUSE_SLOT, BAR 0x4808, TPPOLL_8125) |
+| `0002-makefile-ipxe-debug.patch` | `src/Makefile` | Added `DRIVERS_ipxe-debug` definition (debug target inherits the full driver set, fixes `obj_ipxe_debug` link failure) |
+| `0003-snponly-local-boot.patch` | `src/drivers/net/efi/snponly.c` | snponly local boot support: when chainload location fails (local UEFI boot), fall back to taking over all SNP/NII/MNP devices; PXE chainload behaviour unchanged |
+| `0004-realtek-8126-adaptation.patch` | `src/drivers/net/realtek.c`, `realtek.h` | RTL8126 5GbE adaptation (ICVerID detection and PHY configuration dispatch, GPHY OCP/CSI interfaces, 3 PHY static configuration tables, ZRXDC/ASPM configuration) |
 
-> RTL8168 相关研究已于 2026-08 终止，补丁不含 8168 过滤或修复代码（见 `../docs/8168-research-log.md`）。
+> RTL8168 research was terminated in 2026-08; the patches contain no 8168 filtering or fix code (see `../docs/8168-research-log.md`).
 
-## 授权说明
+## Licensing
 
-- 补丁修改的上游文件（`realtek.c`、`snponly.c`、`Makefile`）继承 iPXE 的 GPL-2.0-or-later / UBDL 许可；
-- `0001` 中 RTL8125 适配部分（XID 版本表、EPHY 初始化、电源管理等）参考 Linux 内核 r8169 驱动（`drivers/net/ethernet/realtek/r8169_main.c`，GPL-2.0-only），该部分**仅按 GPL-2.0 授权**，不得以 UBDL 或更高版本许可再分发；
-- 本仓库整体遵循 GPL-2.0（见 `../LICENSE`），补丁头部均含 SPDX 声明。
+- The upstream files modified by the patches (`realtek.c`, `snponly.c`, `Makefile`) inherit the iPXE GPL-2.0-or-later / UBDL licence;
+- the RTL8125 adaptation parts in `0001` (XID version table, EPHY initialisation, power management, etc.) are derived from the Linux kernel r8169 driver (`drivers/net/ethernet/realtek/r8169_main.c`, GPL-2.0-only); those parts are **GPL-2.0 only** and may not be redistributed under UBDL or any later licence;
+- the RTL8126 adaptation parts in `0004` (PHY static configuration tables, GPHY OCP/CSI interfaces, ZRXDC/ASPM configuration, etc.) are derived from the Realtek r8126 driver (`r8126_n.c`, GPL-2.0-only, Copyright 2025 Realtek Semiconductor Corp.) and the Linux kernel r8169 driver (`drivers/net/ethernet/realtek/r8169_main.c`, GPL-2.0-only); those parts are **GPL-2.0 only** and may not be redistributed under UBDL or any later licence;
+- this repository as a whole is licensed under GPL-2.0 (see `../LICENSE`); every patch header carries an SPDX declaration.
 
-## 升级上游基线流程
+## Upgrading the Upstream Baseline
 
-上游升级后补丁可能无法应用，按以下流程迁移：
+After an upstream upgrade the patches may no longer apply. Migration workflow:
 
-1. 更新基线：
+1. Update the baseline:
 
    ```bash
    git fetch https://github.com/ipxe/ipxe.git master
-   git log FETCH_HEAD --oneline | head   # 确认新基线
+   git log FETCH_HEAD --oneline | head   # confirm the new baseline
    ```
 
-2. 在构建缓存工作树（`.cache/ipxe-upstream`）中**在新基线上重新生成补丁**：
+2. Regenerate the patches in the build cache worktree (`.cache/ipxe-upstream`) against the new baseline:
 
    ```bash
-   # 在 .cache/ipxe-upstream 中：先检出新基线，再手动复现修改（或对照旧补丁），最后：
+   # In .cache/ipxe-upstream: check out the new baseline, reproduce the modifications
+   # (or apply the old patches and resolve conflicts), then:
    git diff > patches/0001-realtek-8125-adaptation.patch
    ```
 
-   注意：**先应用旧补丁到新基线 → 手动解决冲突 → 再重新生成**，比手工重写更可靠；
-   重新生成的补丁会覆盖头部许可注释，须从旧补丁头部复制保留（见上方"授权说明"）。
-3. 更新 `build/build.sh` 中的 `UPSTREAM_COMMIT` 与本文档基线记录。
+   Note: **apply the old patches to the new baseline → resolve conflicts manually → regenerate** is more reliable than rewriting by hand; regenerating overwrites the header licence comment, so copy it from the old patch header (see "Licensing" above).
+3. Update `UPSTREAM_COMMIT` in `build/build.sh` and the baseline records in this document.
 
-4. 运行 `./build/build.sh` 验证补丁可干净应用、产物功能正常（重点回归：8125 引导）。
+4. Run `./build/build.sh` to verify the patches apply cleanly and the artifacts work (key regression: 8125/8126 boot).
 
-## 注意事项
+## Notes
 
-- `embed/auto.ipxe` 属于**配置资产**（非源码补丁），改动无需重新生成补丁，直接修改 `../embed/auto.ipxe` 后重新构建即可
-- 补丁需保持 `git apply --check` 通过；补丁与基线提交强绑定，`UPSTREAM_COMMIT` 变更前务必走升级流程
+- `embed/auto.ipxe` is a **configuration asset** (not a source patch): changes do not require regenerating patches — modify `../embed/auto.ipxe` and rebuild.
+- Patches must pass `git apply --check`; patches are strongly tied to the baseline commit — always go through the upgrade workflow before changing `UPSTREAM_COMMIT`.

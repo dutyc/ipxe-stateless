@@ -1,45 +1,72 @@
-# 定制内容
+# Customizations
 
-## 设计动机
+[English](customizations.md) | [中文](customizations.zh-CN.md)
 
-很多主板没有 PXE 网络启动选项，或设置繁琐（BIOS 无 Network Boot 入口、默认关闭 UEFI 网络栈、需逐台进 BIOS 配置且 Secure Boot 限制多）。与其依赖主板 PXE，不如提供可经本地介质（USB / 磁盘 / GRUB2 链加载）引导、启动即自动进入网络引导流程的固件——`embed/auto.ipxe`（EMBED 定制）与 `0003`（SNP 固件本地引导适配）即为此而作。
+Every customization in this repository, relative to the upstream iPXE baseline (default `e6e51ccb`), consists of **four patches** plus a **build-level EMBED customization** (`embed/auto.ipxe`, compiled into the firmware via `EMBED=`, not a patch).
 
-对这些定制的维护采用补丁机制而非直接 fork：fork 分支在上游升级时需要持续合并，成本太高。本仓库改为：
+| # | Patch | Scope |
+|---|---|---|
+| 0001 | `0001-realtek-8125-adaptation.patch` | RTL8125 (2.5G) series native driver adaptation |
+| 0002 | `0002-makefile-ipxe-debug.patch` | Debug build fix |
+| 0003 | `0003-snponly-local-boot.patch` | snponly local boot support |
+| 0004 | `0004-realtek-8126-adaptation.patch` | RTL8126 (5G) native driver adaptation |
+
+## Design Rationale
+
+Many mainboards have no PXE boot option, or make it painful to use (BIOS without a Network Boot entry, UEFI network stack disabled by default, per-machine BIOS configuration with Secure Boot restrictions). Instead of depending on mainboard PXE, this repository provides firmware that boots from local media (USB / disk / GRUB2 chainload) and automatically enters the network boot flow — `embed/auto.ipxe` (EMBED customization) and `0003` (SNP local boot adaptation) exist for this purpose.
+
+Customizations are maintained as patches rather than a fork: a fork branch needs continuous merging on every upstream upgrade, which is too costly. This repository instead uses:
 
 ```
-上游 ipxe 源码（固定基线 commit）
+upstream ipxe source (pinned baseline commit)
     +
-patches/（差异文件，唯一事实来源）
+patches/ (diff files, single source of truth)
     +
-embed/（脚本资产）
+embed/ (script assets)
     ↓ build/build.sh
-dist/（六类固件 + SHA256SUMS）
+dist/ (ten firmware artifacts + SHA256SUMS)
 ```
 
-补丁全部基于**固定上游基线**生成，升级上游时重新生成补丁即可（见 [patches/README.md](../patches/README.md)）。
+All patches are generated against the **same pinned upstream baseline**; upgrading upstream means regenerating the patches (see [patches/README.md](../patches/README.md)).
 
-## 定制清单
+## Customization Details
 
-相对上游 iPXE 基线（默认 `e6e51ccb`）的全部修改，共三个补丁；另有**构建级 EMBED 定制**（`embed/auto.ipxe`，经 `EMBED=` 编译进固件，非补丁）：
+### 1. RTL8125 series adaptation (`0001`)
 
-### 1. RTL8125 全系适配（`0001`）
+- **Rationale**: RTL8125 (2.5G) NICs must be handled by the iPXE native driver — the firmware SNP driver hangs in iSCSI mount scenarios and cannot be used for diskless boot; upstream iPXE has incomplete support for some 8125 versions (XID 0x688 series).
+- **Changes**: `src/drivers/net/realtek.c`, `realtek.h`
+  - XID 0x688 version table and device identification
+  - EPHY initialisation table (2.5G PHY configuration)
+  - 32-bit interrupt status register
+  - FETCH / PAUSE_SLOT configuration
+  - BAR 0x4808 (2.5G-specific register window)
+  - TPPOLL_8125 polling
+- **Licence**: the 8125 adaptation is derived from the Linux kernel r8169 driver (GPL-2.0-only); it is licensed under GPL-2.0 only and may not be redistributed under UBDL (see the header of `patches/0001`).
 
-- **背景**：RTL8125（2.5G）网卡必须由 iPXE native 驱动接管——固件 SNP 驱动在 iSCSI 挂载场景存在挂起缺陷，无法用于无盘引导；而上游 iPXE 对部分 8125 版本（XID 0x688 系列）支持不完整。
-- **修改**：`src/drivers/net/realtek.c`、`realtek.h`
-  - XID 0x688 版本表与设备识别
-  - EPHY 初始化表（2.5G PHY 配置）
-  - 32 位中断状态寄存器
-  - FETCH/PAUSE_SLOT 配置
-  - BAR 0x4808（2.5G 专用寄存器窗口）
-  - TPPOLL_8125 轮询方式
+### 2. Debug build fix (`0002`)
 
-### 2. debug 构建修复（`0002`）
+- **Rationale**: the `ipxe-debug.efi` target had no driver set defined, so the artifact was an empty shell (no NIC drivers at all) and useless for fault diagnosis.
+- **Changes**: `src/Makefile` — added `DRIVERS_ipxe-debug += $(DRIVERS_ipxe)` so the debug target inherits the full driver set.
 
-- **背景**：`ipxe-debug.efi` 目标未定义驱动集，构建产物为空壳（无任何网卡驱动），无法用于故障定位。
-- **修改**：`src/Makefile` 新增 `DRIVERS_ipxe-debug += $(DRIVERS_ipxe)`，debug 目标继承全驱动集。
+### 3. snponly local boot support (`0003`)
 
-### 3. snponly 本地引导支持（`0003`）
+- **Rationale**: the official `snponly.efi` only supports firmware-PXE chainload scenarios (it takes over only the device that loaded iPXE); booting from local UEFI (USB / disk) finds no NIC and drops straight to the shell. This is the companion adaptation for the "mainboard has no PXE boot option" scenario — local-media boot also needs network takeover capability.
+- **Changes**: `src/drivers/net/efi/snponly.c` — when chainload location fails, fall back to taking over all SNP/NII/MNP devices; PXE chainload behaviour is unchanged.
+- **Effect**: machines where native drivers are unavailable (e.g. RTL8168 initialisation hangs on certain mainboards) still have an SNP fallback path for local boot.
 
-- **背景**：官方 `snponly.efi` 仅支持固件 PXE 链加载场景（只接管加载 iPXE 的那个设备）；从本地 UEFI（U 盘/磁盘）引导时找不到任何网卡，直接进入 shell。这是“主板无 PXE 网络启动选项”场景的配套适配——本地介质引导时同样需要网络接管能力。
-- **修改**：`src/drivers/net/efi/snponly.c`——链加载定位失败时回退接管全部 SNP/NII/MNP 设备；PXE 链加载场景行为不变。
-- **作用**：native 驱动不可用（如特定主板 RTL8168 初始化挂起）的机器，本地引导也有 SNP 兜底路径。
+### 4. RTL8126 5GbE adaptation (`0004`)
+
+- **Rationale**: RTL8126 (5G) is a 2024 NIC with no `0x8126` device entry in the upstream iPXE baseline. Its GPHY must be initialised with one of three PHY configuration methods (static register tables) selected by ICVerID, and some PCIe configuration (ZRXDC timeout reporting, ASPM entry latency) requires the CSI mechanism to access extended configuration space — none of which the baseline driver has.
+- **Changes**: `src/drivers/net/realtek.c`, `realtek.h`
+  - `0x8126` device entry and `realtek_detect_8126` (TxConfig 0x64800000 family detection + ICVerID → mcfg 1/2/3 dispatch)
+  - GPHY OCP interface functions (`realtek_gphy_ocp_read/write/modify`, refactored from the 0001 inlined MII access and reused)
+  - CSI extended configuration space interface (`realtek_csi_read/write/modify`, same mechanism as Linux `rtl_csi_*`)
+  - PHY static configuration tables x3 (`realtek_8126a_1/2/3_phy`, 367 entries in total, from the official r8126 driver; MCU microcode section excluded; direct-write vs read-modify-write semantics distinguished, corresponding to the official `rtl8126_mdio_direct_write_phy_ocp` and `rtl8126_clear_and_set_eth_phy_ocp_bit` respectively) and `realtek_hw_phy_config_8126`
+  - `realtek_hw_start_8126`: ZRXDC disabled + default ASPM entry latency (CSI path) + 8125 common initialisation + PHY configuration
+  - Mount points: `realtek_detect` / `realtek_open` / `realtek_probe` dispatch on `mac_ver == 70`
+- **Verification**: full build passes all 10 artifacts (including the `DEBUG=realtek:3` debug target); field testing on physical hardware pending.
+- **Licence**: the 8126 adaptation is derived from the Realtek r8126 driver (GPL-2.0-only, Copyright 2025 Realtek Semiconductor Corp.) and the Linux kernel r8169 driver (GPL-2.0-only); it is licensed under GPL-2.0 only and may not be redistributed under UBDL (see the header of `patches/0004`).
+
+## EMBED Auto-Boot Script
+
+`embed/auto.ipxe` is a configuration asset (not a source patch): changes do not require regenerating patches — modify the file and rebuild. See [patches/README.md](../patches/README.md) for details.

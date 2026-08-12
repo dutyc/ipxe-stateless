@@ -1,104 +1,101 @@
 # iPXE-Stateless
 
-**无状态云原生 iPXE** —— 基于**上游 iPXE + 补丁（Patch）机制**的自动化固件构建仓库。
+[![License](https://img.shields.io/badge/License-GPL--2.0-green)](LICENSE)
+[![GitHub stars](https://img.shields.io/github/stars/dutyc/ipxe-stateless)](https://github.com/dutyc/ipxe-stateless)
+[![Version](https://img.shields.io/github/v/tag/dutyc/ipxe-stateless)](https://github.com/dutyc/ipxe-stateless/releases)
+[![Platform](https://img.shields.io/badge/Platform-x86_64%20UEFI%2FBIOS-0f766e)](docs/network-support.md)
+[![Upstream](https://img.shields.io/badge/Upstream-iPXE%20e6e51ccb-111111)](patches/README.md)
+[![Patches](https://img.shields.io/badge/Patches-4-7c3aed)](docs/customizations.md)
 
-定位：为无状态（Stateless）云原生环境提供统一引导固件——客户端不保存任何状态，启动即通过 DHCP 获取配置、链式加载引导脚本、无盘进入系统。固件自身亦无状态：仓库不直接包含 iPXE 源码，仅维护差异补丁与构建资产，可随时基于新基线重建。
+[English](README.md) | [中文](README.zh-CN.md)
 
-本仓库**不包含 iPXE 源码**，只保存：
+**Stateless cloud-native iPXE** — an automated firmware build repository based on **upstream iPXE + patch-based customization**.
 
-- `patches/` —— 对上游源码的全部修改（git apply 可直接应用）
-- `embed/` —— EMBED 引导脚本等构建资产
-- `build/` —— 自动化构建流水线
-- `dist/` —— 构建产物（不入库，由流水线生成）
+iPXE-Stateless provides unified network boot firmware for stateless cloud-native environments: clients keep no state, obtaining configuration via DHCP at boot, chainloading boot scripts, and entering diskless systems. The repository itself is likewise stateless: it contains no iPXE source code, only difference patches and build assets, and can be rebuilt from any upstream baseline at any time.
 
-## 定制内容
+## Related Projects
 
-设计动机与全部修改（三个补丁 + EMBED 构建级定制）详见 [docs/customizations.md](docs/customizations.md)：
+- **[iPXE-All-Ready](https://github.com/dutyc/ipxe-all-ready)** — a complete stateless cloud-native diskless compute platform: central Controller (FastAPI control plane + DHCP/TFTP/HTTP boot services), iSCSI Server nodes (stgt / LIO), diskless Worker nodes, Web UI and documentation site.
 
-- `0001` — RTL8125 全系适配（native 驱动）
-- `0002` — debug 构建修复
-- `0003` — snponly 本地引导支持
+This repository is the **firmware foundation** of iPXE-All-Ready. Its boot-media guide consumes the firmware artifacts built here (`dist/`, RTL8125 driver + EMBED auto-boot editions) to bring Workers into the iPXE boot chain; the platform then takes over via DHCP-served scripts and iSCSI system disks. The two repositories have strictly separated responsibilities — **ipxe-stateless owns how the firmware is built; iPXE-All-Ready owns how the platform runs.**
 
-## 网卡支持
+## Features
 
-常见网卡在本仓库固件（上游 iPXE 基线 + 定制补丁）下的支持情况（覆盖良好 / 不支持 / 有条件三类 + 实测记录）见 [docs/network-support.md](docs/network-support.md)。
+- **Patch-based, no fork** — all modifications to upstream iPXE are maintained as `git apply`-able patches under `patches/`, generated against a fixed upstream baseline (`e6e51ccb`). Upgrading upstream means regenerating the patches, not merging a fork.
+- **Native NIC driver adaptation** — RTL8125 (2.5G) and RTL8126 (5G) series patches provide reliable native-driver network boot (see [docs/customizations.md](docs/customizations.md)).
+- **Local boot fallback** — SNP firmware adaptation for booting from local media (USB / disk / GRUB2 chainload) when the mainboard lacks a PXE boot option.
+- **EMBED auto-boot script** — `embed/auto.ipxe` is compiled into the firmware; plug in and boot, no manual configuration.
+- **Reproducible one-command build** — the pipeline fetches source, applies patches, builds, and archives 10 firmware artifacts together with `SHA256SUMS`.
 
-## 上游依赖与许可
+## Quick Start
 
-本仓库的固件构建与定制基于两个上游项目：
+```bash
+# Full build (fetch source -> apply patches -> build -> archive)
+./build/build.sh
 
-- **iPXE**（[github.com/ipxe/ipxe](https://github.com/ipxe/ipxe)，GPL-2.0-or-later / UBDL 双许可）——固件基础源码。本仓库不包含其源码，仅以补丁形式维护对其的全部修改；补丁基于固定基线 `e6e51ccb` 生成，升级上游时重新生成（见 [patches/README.md](patches/README.md)）。
+# Common variables
+UPSTREAM_COMMIT=<sha> ./build/build.sh    # Pin upstream baseline (default e6e51ccb)
+JOBS=8 ./build/build.sh                   # Parallelism (default: nproc)
+UPSTREAM_URL=<mirror-url> ./build/build.sh # Alternate source mirror
+```
 
-- **Linux 内核 r8169 驱动**（`drivers/net/ethernet/realtek/r8169_main.c`，GPL-2.0）——`0001` 补丁中 RTL8125 适配（XID 版本表、EPHY 初始化、电源管理等）的寄存器级参考实现，原生驱动行为与 Linux 对齐。
+Requirements: Linux with `git` / `make` / `gcc`, and network access to the upstream repository (GitHub by default, mirrors supported).
 
-本仓库整体遵循 **GPL-2.0**（见 [LICENSE](LICENSE)），覆盖对上游 iPXE 的全部修改（含参考 Linux 内核代码的部分），与上游 GPL-2.0-or-later 及 Linux 内核 GPL-2.0 许可兼容。其中参考 Linux 内核的 8125 适配部分**仅按 GPL-2.0 授权**，不得以 UBDL 或更高版本许可再分发。
+## Usage
 
-补丁应用后的完整源码快照见 [reference/](reference/)（含 `0001` 的 realtek.c 与 `0003` 的 snponly.c），便于直接阅读修改内容；构建不直接使用该目录，仍由 `build.sh` 从上游基线 + 补丁现场生成，升级补丁时须同步更新快照。
+All artifacts are written to `dist/`:
 
-## 目录结构
+| Artifact | Form factor | Description |
+|---|---|---|
+| `dist/pxe-uefi/ipxe.efi` | PXE boot (UEFI) | No EMBED; boot script served via DHCP |
+| `dist/pxe-uefi/ipxe-debug.efi` | Same (debug build) | `DEBUG=realtek:3`, for fault diagnosis |
+| `dist/pxe-uefi/snponly.efi` | PXE boot (SNP-only, UEFI) | No EMBED; with firmware PXE chainloading takes over only the chainloaded device; falls back to all SNP devices when chainload location fails |
+| `dist/pxe-uefi/snponly-debug.efi` | Same (debug build) | `DEBUG=realtek:3`, for fault diagnosis |
+| `dist/direct-uefi/ipxe.efi` | UEFI direct boot (EMBED) | Embeds `auto.ipxe`; boot-and-go boot chain |
+| `dist/direct-uefi/ipxe-debug.efi` | Same (debug build) | `DEBUG=realtek:3`, for fault diagnosis |
+| `dist/direct-uefi/snponly.efi` | UEFI direct boot (SNP-only, EMBED) | Uses firmware SNP protocol; fallback path for machines where native drivers fail |
+| `dist/grub-bios/ipxe.lkrn` | GRUB2 BIOS boot (EMBED) | `linux16 /ipxe.lkrn` |
+| `dist/undionly.kpxe` | PXE boot (BIOS) | No EMBED; no native drivers, uses the UNDI interface of the NIC PXE ROM; compatible with any NIC that has a PXE ROM |
+| `dist/usb/ipxe.usb` | BIOS boot media (EMBED) | Write whole-disk to a USB stick |
+
+`dist/SHA256SUMS` lists the sha256 checksums of all artifacts.
+
+## Documentation
+
+| Document | Purpose |
+|---|---|
+| [docs/customizations.md](docs/customizations.md) | Design rationale and detailed description of every customization (patches 0001-0004 + EMBED) |
+| [docs/network-support.md](docs/network-support.md) | NIC support matrix (well-covered / unsupported / conditional + field-test records) |
+| [patches/README.md](patches/README.md) | Patch set details, licensing, and upstream baseline upgrade workflow |
+| [docs/8168-research-log.md](docs/8168-research-log.md) | RTL8168 research log (investigation terminated) |
+
+## Project Structure
 
 ```
 ipxe-stateless/
-├── patches/                 # 源码补丁集（按编号顺序应用）
-│   ├── 0001-realtek-8125-adaptation.patch
-│   ├── 0002-makefile-ipxe-debug.patch
-│   └── 0003-snponly-local-boot.patch
+├── patches/                 # Source patch set (applied in filename order)
 ├── embed/
-│   └── auto.ipxe            # EMBED 自动引导脚本
+│   └── auto.ipxe            # EMBED auto-boot script
 ├── build/
-│   └── build.sh             # 自动化构建流水线
-├── docs/
-│   ├── customizations.md    # 设计动机与定制内容详解
-│   ├── network-support.md   # 网卡支持矩阵（覆盖/风险/实测）
-│   └── 8168-research-log.md # RTL8168 研究记录
-├── reference/               # 补丁应用后的参考源码快照（构建不使用）
-│   └── src/drivers/net/
-│       ├── realtek.c        # 0001 应用后：含 RTL8125 全系适配
-│       └── efi/snponly.c    # 0003 应用后：snponly 本地引导支持
-├── dist/                    # 构建产物（.gitignore）
+│   └── build.sh             # Automated build pipeline
+├── docs/                    # Design, NIC support, research documents
+├── reference/               # Reference source snapshots with patches applied (not used for builds)
+├── dist/                    # Build artifacts (gitignored)
 └── README.md
 ```
 
-## 快速开始
+The build cache lives in `.cache/` (deletable and rebuildable without affecting the repository).
 
-```bash
-# 完整构建（拉源码 -> 打补丁 -> 构建 -> 归档）
-./build/build.sh
+## How It Works
 
-# 常用变量
-UPSTREAM_COMMIT=<sha> ./build/build.sh   # 指定上游基线
-JOBS=8 ./build/build.sh                  # 并行度（默认 nproc）
-UPSTREAM_URL=<镜像地址> ./build/build.sh # 更换源码源
-```
+1. **Fetch source** — shallow-clone upstream `ipxe/ipxe`, check out the pinned baseline, `clean` before each build to guarantee a pristine tree.
+2. **Apply patches** — `git apply --check` then apply in filename order; abort immediately if any patch fails.
+3. **Install assets** — copy `embed/auto.ipxe` to the source `src/embed/`.
+4. **Build** — build each artifact in the manifest (force-delete same-name EFI targets first so the EMBED parameter takes effect).
+5. **Archive** — copy artifacts to `dist/` by category and generate `SHA256SUMS`.
 
-产物输出到 `dist/`：
+## Upstream & License
 
-| 产物 | 目标形态 | 说明 |
-|---|---|---|
-| `dist/pxe-uefi/ipxe.efi` | PXE 网络启动（UEFI） | 无 EMBED，脚本由 DHCP 下发 |
-| `dist/pxe-uefi/ipxe-debug.efi` | 同上（debug 版） | `DEBUG=realtek:3`，故障定位用 |
-| `dist/pxe-uefi/snponly.efi` | PXE 网络启动（SNP 专用） | 无 EMBED；固件 PXE 链加载时仅接管链加载设备，定位失败时回退接管全部 SNP 设备 |
-| `dist/pxe-uefi/snponly-debug.efi` | 同上（debug 版） | `DEBUG=realtek:3`，故障定位用 |
-| `dist/direct-uefi/ipxe.efi` | UEFI 直接引导（含 EMBED） | 内置 auto.ipxe，启动即走引导链 |
-| `dist/direct-uefi/ipxe-debug.efi` | 同上（debug 版） | `DEBUG=realtek:3`，故障定位用 |
-| `dist/direct-uefi/snponly.efi` | UEFI 直接引导（SNP 专用，含 EMBED） | 无 native 驱动，用固件 SNP 协议；固件 PXE 链加载时仅接管链加载设备，本地引导（U 盘/磁盘）时回退接管全部 SNP 设备，native 驱动不可用的机器兜底 |
-| `dist/grub-bios/ipxe.lkrn` | GRUB2 BIOS 引导（含 EMBED） | `linux16 /ipxe.lkrn` |
-| `dist/undionly.kpxe` | PXE 网络启动（BIOS） | 无 EMBED，脚本由 DHCP 下发；无 native 驱动，经网卡 ROM 的 UNDI 接口收发；兼容一切带 PXE ROM 的网卡 |
-| `dist/usb/ipxe.usb` | BIOS 引导介质（含 EMBED） | 整盘写入 U 盘 |
+The firmware is built from upstream **iPXE** ([github.com/ipxe/ipxe](https://github.com/ipxe/ipxe), GPL-2.0-or-later / UBDL dual-licensed). This repository contains no iPXE source code; all modifications are maintained as patches against the pinned baseline `e6e51ccb` (see [patches/README.md](patches/README.md)).
 
-`dist/SHA256SUMS` 为全部产物的 sha256 校验清单。
-
-## 工作机制
-
-1. **获取源码**：浅克隆上游 `ipxe/ipxe`，检出固定基线（默认 `e6e51ccb`），每次构建前 `clean` 保证干净树
-2. **应用补丁**：按文件名顺序 `git apply --check` 验证后应用；任一补丁失败立即中止并提示
-3. **安装资产**：拷贝 `embed/auto.ipxe` 到源码 `src/embed/`
-4. **构建**：按清单逐个构建（同名 EFI 目标构建前强制删除，确保 EMBED 参数生效）
-5. **归档**：产物分类拷贝至 `dist/` 并生成 `SHA256SUMS`
-
-源码与构建缓存位于 `.cache/`（可删除重建，不影响仓库）。
-
-## 环境要求
-
-- Linux + `git` / `make` / `gcc`（iPXE x86_64 构建工具链）
-- 网络可访问上游仓库（默认 GitHub，可换镜像）
+This repository as a whole is licensed under **GPL-2.0** (see [LICENSE](LICENSE)), compatible with upstream GPL-2.0-or-later / UBDL. Parts of the adaptations derived from third-party drivers are **GPL-2.0 only** and may not be redistributed under UBDL or any later licence (see the header declarations of the individual patches and [docs/customizations.md](docs/customizations.md)).
