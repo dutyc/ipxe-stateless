@@ -236,6 +236,171 @@ static int realtek_init_eeprom ( struct net_device *netdev ) {
 
 /******************************************************************************
  *
+ * GPHY OCP interface
+ *
+ ******************************************************************************
+ */
+
+/**
+ * Read from GPHY OCP register
+ *
+ * @v rtl		Realtek device
+ * @v reg		Register address
+ * @ret value		Data read, or negative error
+ */
+static int realtek_gphy_ocp_read ( struct realtek_nic *rtl, uint32_t reg ) {
+	uint32_t value;
+	unsigned int i;
+
+	/* OCP registers are 16-bit and must be 2-byte aligned */
+	if ( reg & 0xffff0001 )
+		return -EINVAL;
+
+	/* Initiate read */
+	writel ( ( reg << 15 ), rtl->regs + RTL_GPHY_OCP );
+
+	/* Wait for read to complete */
+	for ( i = 0 ; i < RTL_MII_MAX_WAIT_US ; i++ ) {
+		value = readl ( rtl->regs + RTL_GPHY_OCP );
+		if ( value & RTL_OCPAR_FLAG )
+			return ( value & RTL_EPHYAR_DATA_MASK );
+		udelay ( 1 );
+	}
+
+	DBGC ( rtl, "REALTEK %p timed out waiting for GPHY OCP read\n", rtl );
+	return -ETIMEDOUT;
+}
+
+/**
+ * Write to GPHY OCP register
+ *
+ * @v rtl		Realtek device
+ * @v reg		Register address
+ * @v data		Data to write
+ */
+static void realtek_gphy_ocp_write ( struct realtek_nic *rtl, uint32_t reg,
+				     uint32_t data ) {
+	unsigned int i;
+
+	/* OCP registers are 16-bit and must be 2-byte aligned */
+	if ( reg & 0xffff0001 )
+		return;
+
+	/* Initiate write */
+	writel ( ( RTL_OCPAR_FLAG | ( reg << 15 ) | data ),
+		 rtl->regs + RTL_GPHY_OCP );
+
+	/* Wait for write to complete */
+	for ( i = 0 ; i < RTL_MII_MAX_WAIT_US ; i++ ) {
+		if ( ! ( readl ( rtl->regs + RTL_GPHY_OCP ) & RTL_OCPAR_FLAG ) )
+			return;
+		udelay ( 1 );
+	}
+
+	DBGC ( rtl, "REALTEK %p timed out waiting for GPHY OCP write\n", rtl );
+}
+
+/**
+ * Modify GPHY OCP register
+ *
+ * @v rtl		Realtek device
+ * @v reg		Register address
+ * @v clear		Bits to clear
+ * @v set		Bits to set
+ */
+static void realtek_gphy_ocp_modify ( struct realtek_nic *rtl, uint32_t reg,
+				      uint32_t clear, uint32_t set ) {
+	int data;
+
+	data = realtek_gphy_ocp_read ( rtl, reg );
+	if ( data < 0 )
+		return;
+	data &= ~clear;
+	data |= set;
+	realtek_gphy_ocp_write ( rtl, reg, data );
+}
+
+/**
+ * Read from CSI register
+ *
+ * The CSI interface provides access to PCI extended configuration
+ * space, which is not reachable via the standard PCI configuration
+ * mechanism (as does Linux rtl_csi_read()).
+ *
+ * @v rtl		Realtek device
+ * @v addr		PCI configuration space address
+ * @ret value		Data read, or all ones on error
+ */
+static uint32_t realtek_csi_read ( struct realtek_nic *rtl,
+				   unsigned int addr ) {
+	uint32_t value;
+	unsigned int i;
+
+	/* Initiate read */
+	writel ( ( ( addr & RTL_CSIAR_ADDR_MASK ) | RTL_CSIAR_BYTE_ENABLE |
+		   ( PCI_FUNC ( rtl->pci->busdevfn ) << 16 ) ),
+		 rtl->regs + RTL_CSIAR );
+
+	/* Wait for read to complete */
+	for ( i = 0 ; i < RTL_MII_MAX_WAIT_US ; i++ ) {
+		value = readl ( rtl->regs + RTL_CSIAR );
+		if ( value & RTL_CSIAR_FLAG )
+			return readl ( rtl->regs + RTL_CSIDR );
+		udelay ( 1 );
+	}
+
+	DBGC ( rtl, "REALTEK %p timed out waiting for CSI read\n", rtl );
+	return ~0;
+}
+
+/**
+ * Write to CSI register
+ *
+ * @v rtl		Realtek device
+ * @v addr		PCI configuration space address
+ * @v value		Data to write
+ */
+static void realtek_csi_write ( struct realtek_nic *rtl, unsigned int addr,
+				uint32_t value ) {
+	unsigned int i;
+
+	/* Initiate write */
+	writel ( value, rtl->regs + RTL_CSIDR );
+	writel ( ( RTL_CSIAR_FLAG | ( addr & RTL_CSIAR_ADDR_MASK ) |
+		   RTL_CSIAR_BYTE_ENABLE |
+		   ( PCI_FUNC ( rtl->pci->busdevfn ) << 16 ) ),
+		 rtl->regs + RTL_CSIAR );
+
+	/* Wait for write to complete */
+	for ( i = 0 ; i < RTL_MII_MAX_WAIT_US ; i++ ) {
+		if ( ! ( readl ( rtl->regs + RTL_CSIAR ) & RTL_CSIAR_FLAG ) )
+			return;
+		udelay ( 1 );
+	}
+
+	DBGC ( rtl, "REALTEK %p timed out waiting for CSI write\n", rtl );
+}
+
+/**
+ * Modify CSI register
+ *
+ * @v rtl		Realtek device
+ * @v addr		PCI configuration space address
+ * @v clear		Bits to clear
+ * @v set		Bits to set
+ */
+static void realtek_csi_modify ( struct realtek_nic *rtl, unsigned int addr,
+				 uint32_t clear, uint32_t set ) {
+	uint32_t value;
+
+	value = realtek_csi_read ( rtl, addr );
+	value &= ~clear;
+	value |= set;
+	realtek_csi_write ( rtl, addr, value );
+}
+
+/******************************************************************************
+ *
  * MII interface
  *
  ******************************************************************************
@@ -264,19 +429,7 @@ static int realtek_mii_read ( struct mii_interface *mdio,
 	/* Read via OCP GPHY interface, if applicable */
 	if ( rtl->have_ocp ) {
 		addr = ( RTL_OCP_STD_PHY_BASE + ( 2 * reg ) );
-		writel ( ( addr << 15 ), rtl->regs + RTL_GPHY_OCP );
-
-		/* Wait for read to complete */
-		for ( i = 0 ; i < RTL_MII_MAX_WAIT_US ; i++ ) {
-			value = readl ( rtl->regs + RTL_GPHY_OCP );
-			if ( value & RTL_OCPAR_FLAG )
-				return ( value & RTL_EPHYAR_DATA_MASK );
-			udelay ( 1 );
-		}
-
-		DBGC ( rtl, "REALTEK %p timed out waiting for OCP MII read\n",
-		       rtl );
-		return -ETIMEDOUT;
+		return realtek_gphy_ocp_read ( rtl, addr );
 	}
 
 	/* Initiate read */
@@ -324,20 +477,8 @@ static int realtek_mii_write ( struct mii_interface *mdio,
 	/* Write via OCP GPHY interface, if applicable */
 	if ( rtl->have_ocp ) {
 		addr = ( RTL_OCP_STD_PHY_BASE + ( 2 * reg ) );
-		writel ( ( RTL_OCPAR_FLAG | ( addr << 15 ) | data ),
-			 rtl->regs + RTL_GPHY_OCP );
-
-		/* Wait for write to complete */
-		for ( i = 0 ; i < RTL_MII_MAX_WAIT_US ; i++ ) {
-			if ( ! ( readl ( rtl->regs + RTL_GPHY_OCP ) &
-				 RTL_OCPAR_FLAG ) )
-				return 0;
-			udelay ( 1 );
-		}
-
-		DBGC ( rtl, "REALTEK %p timed out waiting for OCP MII write\n",
-		       rtl );
-		return -ETIMEDOUT;
+		realtek_gphy_ocp_write ( rtl, addr, data );
+		return 0;
 	}
 
 	/* Initiate write */
@@ -605,8 +746,17 @@ static void realtek_hw_start_8125 ( struct realtek_nic *rtl ) {
 	/* Disable new TX descriptor format */
 	realtek_mac_ocp_modify ( rtl, 0xeb58, 0x0001, 0x0000 );
 
+	/* Disable ZRXDC timeout reporting (as does Linux
+	 * rtl_hw_start_8125_common() for the RTL8126A)
+	 */
+	if ( rtl->mac_ver == 70 )
+		writeb ( ( readb ( rtl->regs + 0xd8 ) & ~0x02 ),
+			 rtl->regs + 0xd8 );
+
 	/* Configure descriptor ring behaviour */
-	if ( rtl->mac_ver == 63 ) {
+	if ( rtl->mac_ver == 70 ) {
+		realtek_mac_ocp_modify ( rtl, 0xe614, 0x0700, 0x0400 );
+	} else if ( rtl->mac_ver == 63 ) {
 		realtek_mac_ocp_modify ( rtl, 0xe614, 0x0700, 0x0200 );
 		realtek_mac_ocp_modify ( rtl, 0xe63e, 0x0c30, 0x0000 );
 	} else {
@@ -620,7 +770,10 @@ static void realtek_hw_start_8125 ( struct realtek_nic *rtl ) {
 	realtek_mac_ocp_modify ( rtl, 0xe056, 0x00f0, 0x0000 );
 	realtek_mac_ocp_modify ( rtl, 0xe040, 0x1000, 0x0000 );
 	realtek_mac_ocp_modify ( rtl, 0xea1c, 0x0003, 0x0001 );
-	realtek_mac_ocp_modify ( rtl, 0xea1c, 0x0004, 0x0000 );
+	if ( rtl->mac_ver == 70 )
+		realtek_mac_ocp_modify ( rtl, 0xea1c, 0x0300, 0x0000 );
+	else
+		realtek_mac_ocp_modify ( rtl, 0xea1c, 0x0004, 0x0000 );
 	realtek_mac_ocp_modify ( rtl, 0xe0c0, 0x4f0f, 0x4403 );
 	realtek_mac_ocp_modify ( rtl, 0xe052, 0x0080, 0x0068 );
 	realtek_mac_ocp_modify ( rtl, 0xd430, 0x0fff, 0x047f );
@@ -644,6 +797,531 @@ static void realtek_hw_start_8125 ( struct realtek_nic *rtl ) {
 	/* Disable RX descriptor gate */
 	writel ( ( readl ( rtl->regs + RTL_MISC ) &
 		   ~RTL_MISC_RXDV_GATED_EN ), rtl->regs + RTL_MISC );
+}
+
+/******************************************************************************
+ *
+ * RTL8126 hardware initialisation
+ *
+ ******************************************************************************
+ */
+
+/** A GPHY OCP register initialisation value */
+struct realtek_phy_ocp_init {
+	/** Register address */
+	unsigned int reg;
+	/** Mask of bits to preserve */
+	unsigned int clear;
+	/** Value to set */
+	unsigned int set;
+	/** Write the register (rather than modify in place) */
+	unsigned int write;
+};
+
+/** RTL8126A GPHY OCP initialisation values (PHY configuration
+ * method 1, from the Realtek r8126 driver
+ * rtl8126_hw_phy_config_8126a_1())
+ */
+static const struct realtek_phy_ocp_init realtek_8126a_1_phy[] = {
+	{ 0xa442, 0x0000, 0x0800, 0 },
+};
+
+/** RTL8126A GPHY OCP initialisation values (PHY configuration
+ * method 2, from the Realtek r8126 driver
+ * rtl8126_hw_phy_config_8126a_2())
+ */
+static const struct realtek_phy_ocp_init realtek_8126a_2_phy[] = {
+	{ 0xa442, 0x0000, 0x0800, 0 },
+	{ 0xa436, 0x0000, 0x80bf, 1 },
+	{ 0xa438, 0xff00, 0xed00, 0 },
+	{ 0xa436, 0x0000, 0x80cd, 1 },
+	{ 0xa438, 0xff00, 0x1000, 0 },
+	{ 0xa436, 0x0000, 0x80d1, 1 },
+	{ 0xa438, 0xff00, 0xc800, 0 },
+	{ 0xa436, 0x0000, 0x80d4, 1 },
+	{ 0xa438, 0xff00, 0xc800, 0 },
+	{ 0xa436, 0x0000, 0x80e1, 1 },
+	{ 0xa438, 0x0000, 0x10cc, 1 },
+	{ 0xa436, 0x0000, 0x80e5, 1 },
+	{ 0xa438, 0x0000, 0x4f0c, 1 },
+	{ 0xa436, 0x0000, 0x8387, 1 },
+	{ 0xa438, 0xff00, 0x4700, 0 },
+	{ 0xa80c, 0x00c0, 0x0080, 0 },
+	{ 0xac90, 0x0010, 0x0000, 0 },
+	{ 0xad2c, 0x8000, 0x0000, 0 },
+	{ 0xb87c, 0x0000, 0x8321, 1 },
+	{ 0xb87e, 0xff00, 0x1100, 0 },
+	{ 0xacf8, 0x0000, 0x000c, 0 },
+	{ 0xa436, 0x0000, 0x8183, 1 },
+	{ 0xa438, 0xff00, 0x5900, 0 },
+	{ 0xad94, 0x0000, 0x0020, 0 },
+	{ 0xa654, 0x0800, 0x0000, 0 },
+	{ 0xb648, 0x0000, 0x4000, 0 },
+	{ 0xb87c, 0x0000, 0x839e, 1 },
+	{ 0xb87e, 0xff00, 0x2f00, 0 },
+	{ 0xb87c, 0x0000, 0x83f2, 1 },
+	{ 0xb87e, 0xff00, 0x0800, 0 },
+	{ 0xada0, 0x0000, 0x0002, 0 },
+	{ 0xb87c, 0x0000, 0x80f3, 1 },
+	{ 0xb87e, 0xff00, 0x9900, 0 },
+	{ 0xb87c, 0x0000, 0x8126, 1 },
+	{ 0xb87e, 0xff00, 0xc100, 0 },
+	{ 0xb87c, 0x0000, 0x893a, 1 },
+	{ 0xb87e, 0x0000, 0x8080, 1 },
+	{ 0xb87c, 0x0000, 0x8647, 1 },
+	{ 0xb87e, 0xff00, 0xe600, 0 },
+	{ 0xb87c, 0x0000, 0x862c, 1 },
+	{ 0xb87e, 0xff00, 0x1200, 0 },
+	{ 0xb87c, 0x0000, 0x864a, 1 },
+	{ 0xb87e, 0xff00, 0xe600, 0 },
+	{ 0xb87c, 0x0000, 0x80a0, 1 },
+	{ 0xb87e, 0x0000, 0xbcbc, 1 },
+	{ 0xb87c, 0x0000, 0x805e, 1 },
+	{ 0xb87e, 0x0000, 0xbcbc, 1 },
+	{ 0xb87c, 0x0000, 0x8056, 1 },
+	{ 0xb87e, 0x0000, 0x3077, 1 },
+	{ 0xb87c, 0x0000, 0x8058, 1 },
+	{ 0xb87e, 0xff00, 0x5a00, 0 },
+	{ 0xb87c, 0x0000, 0x8098, 1 },
+	{ 0xb87e, 0x0000, 0x3077, 1 },
+	{ 0xb87c, 0x0000, 0x809a, 1 },
+	{ 0xb87e, 0xff00, 0x5a00, 0 },
+	{ 0xb87c, 0x0000, 0x8052, 1 },
+	{ 0xb87e, 0x0000, 0x3733, 1 },
+	{ 0xb87c, 0x0000, 0x8094, 1 },
+	{ 0xb87e, 0x0000, 0x3733, 1 },
+	{ 0xb87c, 0x0000, 0x807f, 1 },
+	{ 0xb87e, 0x0000, 0x7c75, 1 },
+	{ 0xb87c, 0x0000, 0x803d, 1 },
+	{ 0xb87e, 0x0000, 0x7c75, 1 },
+	{ 0xb87c, 0x0000, 0x8036, 1 },
+	{ 0xb87e, 0xff00, 0x3000, 0 },
+	{ 0xb87c, 0x0000, 0x8078, 1 },
+	{ 0xb87e, 0xff00, 0x3000, 0 },
+	{ 0xb87c, 0x0000, 0x8031, 1 },
+	{ 0xb87e, 0xff00, 0x3300, 0 },
+	{ 0xb87c, 0x0000, 0x8073, 1 },
+	{ 0xb87e, 0xff00, 0x3300, 0 },
+	{ 0xae06, 0xfc00, 0x7c00, 0 },
+	{ 0xb87c, 0x0000, 0x89d1, 1 },
+	{ 0xb87e, 0x0000, 0x0004, 1 },
+	{ 0xa436, 0x0000, 0x8fbd, 1 },
+	{ 0xa438, 0xff00, 0x0a00, 0 },
+	{ 0xa436, 0x0000, 0x8fbe, 1 },
+	{ 0xa438, 0x0000, 0x0d09, 1 },
+	{ 0xb87c, 0x0000, 0x89cd, 1 },
+	{ 0xb87e, 0x0000, 0x0f0f, 1 },
+	{ 0xb87c, 0x0000, 0x89cf, 1 },
+	{ 0xb87e, 0x0000, 0x0f0f, 1 },
+	{ 0xb87c, 0x0000, 0x83a4, 1 },
+	{ 0xb87e, 0x0000, 0x6600, 1 },
+	{ 0xb87c, 0x0000, 0x83a6, 1 },
+	{ 0xb87e, 0x0000, 0x6601, 1 },
+	{ 0xb87c, 0x0000, 0x83c0, 1 },
+	{ 0xb87e, 0x0000, 0x6600, 1 },
+	{ 0xb87c, 0x0000, 0x83c2, 1 },
+	{ 0xb87e, 0x0000, 0x6601, 1 },
+	{ 0xb87c, 0x0000, 0x8414, 1 },
+	{ 0xb87e, 0x0000, 0x6600, 1 },
+	{ 0xb87c, 0x0000, 0x8416, 1 },
+	{ 0xb87e, 0x0000, 0x6601, 1 },
+	{ 0xb87c, 0x0000, 0x83f8, 1 },
+	{ 0xb87e, 0x0000, 0x6600, 1 },
+	{ 0xb87c, 0x0000, 0x83fa, 1 },
+	{ 0xb87e, 0x0000, 0x6601, 1 },
+	{ 0xa436, 0x0000, 0x843b, 1 },
+	{ 0xa438, 0xff00, 0x2000, 0 },
+	{ 0xa436, 0x0000, 0x843d, 1 },
+	{ 0xa438, 0xff00, 0x2000, 0 },
+	{ 0xb516, 0x007f, 0x0000, 0 },
+	{ 0xbf80, 0x0030, 0x0000, 0 },
+	{ 0xa436, 0x0000, 0x8188, 1 },
+	{ 0xa438, 0x0000, 0x0044, 1 },
+	{ 0xa438, 0x0000, 0x00a8, 1 },
+	{ 0xa438, 0x0000, 0x00d6, 1 },
+	{ 0xa438, 0x0000, 0x00ec, 1 },
+	{ 0xa438, 0x0000, 0x00f6, 1 },
+	{ 0xa438, 0x0000, 0x00fc, 1 },
+	{ 0xa438, 0x0000, 0x00fe, 1 },
+	{ 0xa438, 0x0000, 0x00fe, 1 },
+	{ 0xa438, 0x0000, 0x00bc, 1 },
+	{ 0xa438, 0x0000, 0x0058, 1 },
+	{ 0xa438, 0x0000, 0x002a, 1 },
+	{ 0xb87c, 0x0000, 0x8015, 1 },
+	{ 0xb87e, 0xff00, 0x0800, 0 },
+	{ 0xb87c, 0x0000, 0x8ffd, 1 },
+	{ 0xb87e, 0xff00, 0x0000, 0 },
+	{ 0xb87c, 0x0000, 0x8fff, 1 },
+	{ 0xb87e, 0xff00, 0x7f00, 0 },
+	{ 0xb87c, 0x0000, 0x8ffb, 1 },
+	{ 0xb87e, 0xff00, 0x0100, 0 },
+	{ 0xb87c, 0x0000, 0x8fe9, 1 },
+	{ 0xb87e, 0x0000, 0x0002, 1 },
+	{ 0xb87c, 0x0000, 0x8fef, 1 },
+	{ 0xb87e, 0x0000, 0x00a5, 1 },
+	{ 0xb87c, 0x0000, 0x8ff1, 1 },
+	{ 0xb87e, 0x0000, 0x0106, 1 },
+	{ 0xb87c, 0x0000, 0x8fe1, 1 },
+	{ 0xb87e, 0x0000, 0x0102, 1 },
+	{ 0xb87c, 0x0000, 0x8fe3, 1 },
+	{ 0xb87e, 0xff00, 0x0400, 0 },
+	{ 0xa654, 0x0000, 0x0800, 0 },
+	{ 0xa65a, 0x0003, 0x0000, 0 },
+	{ 0xac3a, 0x0000, 0x5851, 1 },
+	{ 0xac3c, 0xd000, 0x2000, 0 },
+	{ 0xac42, 0x0200, 0x01c0, 0 },
+	{ 0xac3e, 0xe000, 0x0000, 0 },
+	{ 0xac42, 0x0038, 0x0000, 0 },
+	{ 0xac42, 0x0002, 0x0005, 0 },
+	{ 0xac1a, 0x0000, 0x00db, 1 },
+	{ 0xade4, 0x0000, 0x01b5, 1 },
+	{ 0xad9c, 0x0c00, 0x0000, 0 },
+	{ 0xb87c, 0x0000, 0x814b, 1 },
+	{ 0xb87e, 0xff00, 0x1100, 0 },
+	{ 0xb87c, 0x0000, 0x814d, 1 },
+	{ 0xb87e, 0xff00, 0x1100, 0 },
+	{ 0xb87c, 0x0000, 0x814f, 1 },
+	{ 0xb87e, 0xff00, 0x0b00, 0 },
+	{ 0xb87c, 0x0000, 0x8142, 1 },
+	{ 0xb87e, 0xff00, 0x0100, 0 },
+	{ 0xb87c, 0x0000, 0x8144, 1 },
+	{ 0xb87e, 0xff00, 0x0100, 0 },
+	{ 0xb87c, 0x0000, 0x8150, 1 },
+	{ 0xb87e, 0xff00, 0x0100, 0 },
+	{ 0xb87c, 0x0000, 0x8118, 1 },
+	{ 0xb87e, 0xff00, 0x0700, 0 },
+	{ 0xb87c, 0x0000, 0x811a, 1 },
+	{ 0xb87e, 0xff00, 0x0700, 0 },
+	{ 0xb87c, 0x0000, 0x811c, 1 },
+	{ 0xb87e, 0xff00, 0x0500, 0 },
+	{ 0xb87c, 0x0000, 0x810f, 1 },
+	{ 0xb87e, 0xff00, 0x0100, 0 },
+	{ 0xb87c, 0x0000, 0x8111, 1 },
+	{ 0xb87e, 0xff00, 0x0100, 0 },
+	{ 0xb87c, 0x0000, 0x811d, 1 },
+	{ 0xb87e, 0xff00, 0x0100, 0 },
+	{ 0xac36, 0x0000, 0x1000, 0 },
+	{ 0xad1c, 0x0100, 0x0000, 0 },
+	{ 0xade8, 0xffc0, 0x1400, 0 },
+	{ 0xb87c, 0x0000, 0x864b, 1 },
+	{ 0xb87e, 0xff00, 0x9d00, 0 },
+	{ 0xa436, 0x0000, 0x8f97, 1 },
+	{ 0xa438, 0x0000, 0x003f, 1 },
+	{ 0xa438, 0x0000, 0x3f02, 1 },
+	{ 0xa438, 0x0000, 0x023c, 1 },
+	{ 0xa438, 0x0000, 0x3b0a, 1 },
+	{ 0xa438, 0x0000, 0x1c00, 1 },
+	{ 0xa438, 0x0000, 0x0000, 1 },
+	{ 0xa438, 0x0000, 0x0000, 1 },
+	{ 0xa438, 0x0000, 0x0000, 1 },
+	{ 0xa438, 0x0000, 0x0000, 1 },
+	{ 0xad9c, 0x0000, 0x0020, 0 },
+	{ 0xb87c, 0x0000, 0x8122, 1 },
+	{ 0xb87e, 0xff00, 0x0c00, 0 },
+	{ 0xb87c, 0x0000, 0x82c8, 1 },
+	{ 0xb87e, 0x0000, 0x03ed, 1 },
+	{ 0xb87e, 0x0000, 0x03ff, 1 },
+	{ 0xb87e, 0x0000, 0x0009, 1 },
+	{ 0xb87e, 0x0000, 0x03fe, 1 },
+	{ 0xb87e, 0x0000, 0x000b, 1 },
+	{ 0xb87e, 0x0000, 0x0021, 1 },
+	{ 0xb87e, 0x0000, 0x03f7, 1 },
+	{ 0xb87e, 0x0000, 0x03b8, 1 },
+	{ 0xb87e, 0x0000, 0x03e0, 1 },
+	{ 0xb87e, 0x0000, 0x0049, 1 },
+	{ 0xb87e, 0x0000, 0x0049, 1 },
+	{ 0xb87e, 0x0000, 0x03e0, 1 },
+	{ 0xb87e, 0x0000, 0x03b8, 1 },
+	{ 0xb87e, 0x0000, 0x03f7, 1 },
+	{ 0xb87e, 0x0000, 0x0021, 1 },
+	{ 0xb87e, 0x0000, 0x000b, 1 },
+	{ 0xb87e, 0x0000, 0x03fe, 1 },
+	{ 0xb87e, 0x0000, 0x0009, 1 },
+	{ 0xb87e, 0x0000, 0x03ff, 1 },
+	{ 0xb87e, 0x0000, 0x03ed, 1 },
+	{ 0xb87c, 0x0000, 0x80ef, 1 },
+	{ 0xb87e, 0xff00, 0x0c00, 0 },
+	{ 0xb87c, 0x0000, 0x82a0, 1 },
+	{ 0xb87e, 0x0000, 0x000e, 1 },
+	{ 0xb87e, 0x0000, 0x03fe, 1 },
+	{ 0xb87e, 0x0000, 0x03ed, 1 },
+	{ 0xb87e, 0x0000, 0x0006, 1 },
+	{ 0xb87e, 0x0000, 0x001a, 1 },
+	{ 0xb87e, 0x0000, 0x03f1, 1 },
+	{ 0xb87e, 0x0000, 0x03d8, 1 },
+	{ 0xb87e, 0x0000, 0x0023, 1 },
+	{ 0xb87e, 0x0000, 0x0054, 1 },
+	{ 0xb87e, 0x0000, 0x0322, 1 },
+	{ 0xb87e, 0x0000, 0x00dd, 1 },
+	{ 0xb87e, 0x0000, 0x03ab, 1 },
+	{ 0xb87e, 0x0000, 0x03dc, 1 },
+	{ 0xb87e, 0x0000, 0x0027, 1 },
+	{ 0xb87e, 0x0000, 0x000e, 1 },
+	{ 0xb87e, 0x0000, 0x03e5, 1 },
+	{ 0xb87e, 0x0000, 0x03f9, 1 },
+	{ 0xb87e, 0x0000, 0x0012, 1 },
+	{ 0xb87e, 0x0000, 0x0001, 1 },
+	{ 0xb87e, 0x0000, 0x03f1, 1 },
+	{ 0xa436, 0x0000, 0x8018, 1 },
+	{ 0xa438, 0x0000, 0x2000, 0 },
+	{ 0xb87c, 0x0000, 0x8fe4, 1 },
+	{ 0xb87e, 0xff00, 0x0000, 0 },
+	{ 0xb54c, 0xffc0, 0x3700, 0 },
+};
+
+/** RTL8126A GPHY OCP initialisation values (PHY configuration
+ * method 3, from the Realtek r8126 driver
+ * rtl8126_hw_phy_config_8126a_3())
+ */
+static const struct realtek_phy_ocp_init realtek_8126a_3_phy[] = {
+	{ 0xa442, 0x0000, 0x0800, 0 },
+	{ 0xa436, 0x0000, 0x8183, 1 },
+	{ 0xa438, 0xff00, 0x5900, 0 },
+	{ 0xa654, 0x0000, 0x0800, 0 },
+	{ 0xb648, 0x0000, 0x4000, 0 },
+	{ 0xad2c, 0x0000, 0x8000, 0 },
+	{ 0xad94, 0x0000, 0x0020, 0 },
+	{ 0xada0, 0x0000, 0x0002, 0 },
+	{ 0xae06, 0xfc00, 0x7c00, 0 },
+	{ 0xb87c, 0x0000, 0x8647, 1 },
+	{ 0xb87e, 0xff00, 0xe600, 0 },
+	{ 0xb87c, 0x0000, 0x8036, 1 },
+	{ 0xb87e, 0xff00, 0x3000, 0 },
+	{ 0xb87c, 0x0000, 0x8078, 1 },
+	{ 0xb87e, 0xff00, 0x3000, 0 },
+	{ 0xb87c, 0x0000, 0x89e9, 1 },
+	{ 0xb87e, 0x0000, 0xff00, 0 },
+	{ 0xb87c, 0x0000, 0x8ffd, 1 },
+	{ 0xb87e, 0xff00, 0x0100, 0 },
+	{ 0xb87c, 0x0000, 0x8ffe, 1 },
+	{ 0xb87e, 0xff00, 0x0200, 0 },
+	{ 0xb87c, 0x0000, 0x8fff, 1 },
+	{ 0xb87e, 0xff00, 0x0400, 0 },
+	{ 0xa436, 0x0000, 0x8018, 1 },
+	{ 0xa438, 0xff00, 0x7700, 0 },
+	{ 0xa436, 0x0000, 0x8f9c, 1 },
+	{ 0xa438, 0x0000, 0x0005, 1 },
+	{ 0xa438, 0x0000, 0x0000, 1 },
+	{ 0xa438, 0x0000, 0x00ed, 1 },
+	{ 0xa438, 0x0000, 0x0502, 1 },
+	{ 0xa438, 0x0000, 0x0b00, 1 },
+	{ 0xa438, 0x0000, 0xd401, 1 },
+	{ 0xa436, 0x0000, 0x8fa8, 1 },
+	{ 0xa438, 0xff00, 0x2900, 0 },
+	{ 0xb87c, 0x0000, 0x814b, 1 },
+	{ 0xb87e, 0xff00, 0x1100, 0 },
+	{ 0xb87c, 0x0000, 0x814d, 1 },
+	{ 0xb87e, 0xff00, 0x1100, 0 },
+	{ 0xb87c, 0x0000, 0x814f, 1 },
+	{ 0xb87e, 0xff00, 0x0b00, 0 },
+	{ 0xb87c, 0x0000, 0x8142, 1 },
+	{ 0xb87e, 0xff00, 0x0100, 0 },
+	{ 0xb87c, 0x0000, 0x8144, 1 },
+	{ 0xb87e, 0xff00, 0x0100, 0 },
+	{ 0xb87c, 0x0000, 0x8150, 1 },
+	{ 0xb87e, 0xff00, 0x0100, 0 },
+	{ 0xb87c, 0x0000, 0x8118, 1 },
+	{ 0xb87e, 0xff00, 0x0700, 0 },
+	{ 0xb87c, 0x0000, 0x811a, 1 },
+	{ 0xb87e, 0xff00, 0x0700, 0 },
+	{ 0xb87c, 0x0000, 0x811c, 1 },
+	{ 0xb87e, 0xff00, 0x0500, 0 },
+	{ 0xb87c, 0x0000, 0x810f, 1 },
+	{ 0xb87e, 0xff00, 0x0100, 0 },
+	{ 0xb87c, 0x0000, 0x8111, 1 },
+	{ 0xb87e, 0xff00, 0x0100, 0 },
+	{ 0xb87c, 0x0000, 0x811d, 1 },
+	{ 0xb87e, 0xff00, 0x0100, 0 },
+	{ 0xad1c, 0x0000, 0x0100, 0 },
+	{ 0xade8, 0xffc0, 0x1400, 0 },
+	{ 0xb87c, 0x0000, 0x864b, 1 },
+	{ 0xb87e, 0xff00, 0x9d00, 0 },
+	{ 0xb87c, 0x0000, 0x862c, 1 },
+	{ 0xb87e, 0xff00, 0x1200, 0 },
+	{ 0xa436, 0x0000, 0x8566, 1 },
+	{ 0xa438, 0x0000, 0x003f, 1 },
+	{ 0xa438, 0x0000, 0x3f02, 1 },
+	{ 0xa438, 0x0000, 0x023c, 1 },
+	{ 0xa438, 0x0000, 0x3b0a, 1 },
+	{ 0xa438, 0x0000, 0x1c00, 1 },
+	{ 0xa438, 0x0000, 0x0000, 1 },
+	{ 0xa438, 0x0000, 0x0000, 1 },
+	{ 0xa438, 0x0000, 0x0000, 1 },
+	{ 0xa438, 0x0000, 0x0000, 1 },
+	{ 0xad9c, 0x0000, 0x0020, 0 },
+	{ 0xb87c, 0x0000, 0x8122, 1 },
+	{ 0xb87e, 0xff00, 0x0c00, 0 },
+	{ 0xb87c, 0x0000, 0x82c8, 1 },
+	{ 0xb87e, 0x0000, 0x03ed, 1 },
+	{ 0xb87e, 0x0000, 0x03ff, 1 },
+	{ 0xb87e, 0x0000, 0x0009, 1 },
+	{ 0xb87e, 0x0000, 0x03fe, 1 },
+	{ 0xb87e, 0x0000, 0x000b, 1 },
+	{ 0xb87e, 0x0000, 0x0021, 1 },
+	{ 0xb87e, 0x0000, 0x03f7, 1 },
+	{ 0xb87e, 0x0000, 0x03b8, 1 },
+	{ 0xb87e, 0x0000, 0x03e0, 1 },
+	{ 0xb87e, 0x0000, 0x0049, 1 },
+	{ 0xb87e, 0x0000, 0x0049, 1 },
+	{ 0xb87e, 0x0000, 0x03e0, 1 },
+	{ 0xb87e, 0x0000, 0x03b8, 1 },
+	{ 0xb87e, 0x0000, 0x03f7, 1 },
+	{ 0xb87e, 0x0000, 0x0021, 1 },
+	{ 0xb87e, 0x0000, 0x000b, 1 },
+	{ 0xb87e, 0x0000, 0x03fe, 1 },
+	{ 0xb87e, 0x0000, 0x0009, 1 },
+	{ 0xb87e, 0x0000, 0x03ff, 1 },
+	{ 0xb87e, 0x0000, 0x03ed, 1 },
+	{ 0xb87c, 0x0000, 0x80ef, 1 },
+	{ 0xb87e, 0xff00, 0x0c00, 0 },
+	{ 0xb87c, 0x0000, 0x82a0, 1 },
+	{ 0xb87e, 0x0000, 0x000e, 1 },
+	{ 0xb87e, 0x0000, 0x03fe, 1 },
+	{ 0xb87e, 0x0000, 0x03ed, 1 },
+	{ 0xb87e, 0x0000, 0x0006, 1 },
+	{ 0xb87e, 0x0000, 0x001a, 1 },
+	{ 0xb87e, 0x0000, 0x03f1, 1 },
+	{ 0xb87e, 0x0000, 0x03d8, 1 },
+	{ 0xb87e, 0x0000, 0x0023, 1 },
+	{ 0xb87e, 0x0000, 0x0054, 1 },
+	{ 0xb87e, 0x0000, 0x0322, 1 },
+	{ 0xb87e, 0x0000, 0x00dd, 1 },
+	{ 0xb87e, 0x0000, 0x03ab, 1 },
+	{ 0xb87e, 0x0000, 0x03dc, 1 },
+	{ 0xb87e, 0x0000, 0x0027, 1 },
+	{ 0xb87e, 0x0000, 0x000e, 1 },
+	{ 0xb87e, 0x0000, 0x03e5, 1 },
+	{ 0xb87e, 0x0000, 0x03f9, 1 },
+	{ 0xb87e, 0x0000, 0x0012, 1 },
+	{ 0xb87e, 0x0000, 0x0001, 1 },
+	{ 0xb87e, 0x0000, 0x03f1, 1 },
+	{ 0xa430, 0x0000, 0x0003, 0 },
+	{ 0xb54c, 0xffc0, 0x3700, 0 },
+	{ 0xb648, 0x0000, 0x0040, 0 },
+	{ 0xb87c, 0x0000, 0x8082, 1 },
+	{ 0xb87e, 0xff00, 0x5d00, 0 },
+	{ 0xb87c, 0x0000, 0x807c, 1 },
+	{ 0xb87e, 0xff00, 0x5000, 0 },
+	{ 0xb87c, 0x0000, 0x809d, 1 },
+	{ 0xb87e, 0xff00, 0x5000, 0 },
+};
+
+/**
+ * Detect RTL8126 chip version
+ *
+ * @v rtl		Realtek device
+ * @ret rc		Return status code
+ */
+static int realtek_detect_8126 ( struct realtek_nic *rtl ) {
+	uint32_t txconfig;
+	unsigned int icverid;
+
+	/* Read chip ID from TxConfig register */
+	txconfig = readl ( rtl->regs + RTL_TCR );
+	if ( txconfig == 0xffffffff )
+		return -ENODEV;
+
+	/* Detect RTL8126 (as does the Realtek r8126 driver
+	 * rtl8126_get_mac_version())
+	 */
+	if ( ( txconfig & 0x7c800000 ) != 0x64800000 )
+		return -ENODEV;
+
+	/* Determine PHY configuration method from the IC version ID */
+	icverid = ( txconfig & 0x00700000 ) >> 20;
+	switch ( icverid ) {
+	case 0:
+		rtl->mcfg = 1;
+		break;
+	case 1:
+		rtl->mcfg = 2;
+		break;
+	case 2:
+		rtl->mcfg = 3;
+		break;
+	default:
+		rtl->mcfg = 2;
+		break;
+	}
+
+	rtl->mac_ver = 70;
+	DBGC ( rtl, "REALTEK %p is an RTL8126A (ICVerID %d, mcfg %d)\n",
+	       rtl, icverid, rtl->mcfg );
+	return 0;
+}
+
+/**
+ * Configure RTL8126 PHY
+ *
+ * @v rtl		Realtek device
+ */
+static void realtek_hw_phy_config_8126 ( struct realtek_nic *rtl ) {
+	const struct realtek_phy_ocp_init *phy = NULL;
+	unsigned int count = 0;
+	unsigned int i;
+
+	/* Configure GPHY OCP registers, as applicable */
+	switch ( rtl->mcfg ) {
+	case 1:
+		phy = realtek_8126a_1_phy;
+		count = ( sizeof ( realtek_8126a_1_phy ) /
+			  sizeof ( realtek_8126a_1_phy[0] ) );
+		break;
+	case 2:
+		phy = realtek_8126a_2_phy;
+		count = ( sizeof ( realtek_8126a_2_phy ) /
+			  sizeof ( realtek_8126a_2_phy[0] ) );
+		break;
+	case 3:
+		phy = realtek_8126a_3_phy;
+		count = ( sizeof ( realtek_8126a_3_phy ) /
+			  sizeof ( realtek_8126a_3_phy[0] ) );
+		break;
+	default:
+		break;
+	}
+	for ( i = 0 ; i < count ; i++ ) {
+		if ( phy[i].write ) {
+			/* Write the register directly (as does the Realtek
+			 * r8126 driver rtl8126_mdio_direct_write_phy_ocp())
+			 */
+			realtek_gphy_ocp_write ( rtl, phy[i].reg, phy[i].set );
+		} else {
+			realtek_gphy_ocp_modify ( rtl, phy[i].reg, phy[i].clear,
+						  phy[i].set );
+		}
+	}
+
+	/* Force legacy power management mode */
+	realtek_gphy_ocp_modify ( rtl, 0xa5b4, 0x8000, 0 );
+
+	/* Return to standard MII register page */
+	mii_write ( &rtl->mii, 0x1f, 0 );
+}
+
+/**
+ * Initialise RTL8126 hardware
+ *
+ * @v rtl		Realtek device
+ */
+static void realtek_hw_start_8126 ( struct realtek_nic *rtl ) {
+
+	/* Disable ZRXDC timeout reporting (as does Linux
+	 * rtl_disable_zrxdc_timeout(); iPXE has no access to PCIe
+	 * extended configuration space, so use the CSI fallback)
+	 */
+	realtek_csi_modify ( rtl, 0x0890, 0x00000001, 0 );
+
+	/* Set default ASPM entry latency (as does Linux
+	 * rtl_set_def_aspm_entry_latency(), using the CSI fallback)
+	 */
+	realtek_csi_modify ( rtl, 0x070c, 0xff000000, 0x27000000 );
+
+	/* Configure common registers */
+	realtek_hw_start_8125 ( rtl );
+
+	/* Configure PHY */
+	realtek_hw_phy_config_8126 ( rtl );
 }
 
 /******************************************************************************
@@ -1014,11 +1692,16 @@ static int realtek_open ( struct net_device *netdev ) {
 	if ( ( rc = realtek_create_buffer ( rtl ) ) != 0 )
 		goto err_create_buffer;
 
-	/* Initialise RTL8125 hardware, if applicable (as does Linux
-	 * rtl_hw_start() on each open)
+	/* Initialise RTL8125/RTL8126 hardware, if applicable (as does
+	 * Linux rtl_hw_start() on each open)
 	 */
-	if ( rtl->have_ocp )
-		realtek_hw_start_8125 ( rtl );
+	if ( rtl->have_ocp ) {
+		if ( rtl->mac_ver == 70 ) {
+			realtek_hw_start_8126 ( rtl );
+		} else {
+			realtek_hw_start_8125 ( rtl );
+		}
+	}
 
 	/* Accept all packets */
 	writel ( 0xffffffffUL, rtl->regs + RTL_MAR0 );
@@ -1401,10 +2084,11 @@ static void realtek_detect ( struct realtek_nic *rtl ) {
 	uint16_t cpcr;
 	uint16_t check_cpcr;
 
-	/* Detect RTL8125 (which uses OCP register access instead of
-	 * PHYAR, and a different TPPoll register)
+	/* Detect RTL8125/RTL8126 (which use OCP register access instead
+	 * of PHYAR, and a different TPPoll register)
 	 */
-	if ( realtek_detect_8125 ( rtl ) == 0 ) {
+	if ( ( realtek_detect_8126 ( rtl ) == 0 ) ||
+	     ( realtek_detect_8125 ( rtl ) == 0 ) ) {
 		rtl->have_phy_regs = 1;
 		rtl->have_ocp = 1;
 		rtl->tppoll = RTL_TPPOLL_8125;
@@ -1498,6 +2182,9 @@ static int realtek_probe ( struct pci_device *pci ) {
 	/* Configure DMA */
 	rtl->dma = &pci->dma;
 
+	/* Record PCI device (for CSI access) */
+	rtl->pci = pci;
+
 	/* Reset the NIC */
 	if ( ( rc = realtek_reset ( rtl ) ) != 0 )
 		goto err_reset;
@@ -1505,9 +2192,14 @@ static int realtek_probe ( struct pci_device *pci ) {
 	/* Detect device type */
 	realtek_detect ( rtl );
 
-	/* Initialise RTL8125 hardware, if applicable */
-	if ( rtl->have_ocp )
-		realtek_hw_start_8125 ( rtl );
+	/* Initialise RTL8125/RTL8126 hardware, if applicable */
+	if ( rtl->have_ocp ) {
+		if ( rtl->mac_ver == 70 ) {
+			realtek_hw_start_8126 ( rtl );
+		} else {
+			realtek_hw_start_8125 ( rtl );
+		}
+	}
 
 	/* Initialise EEPROM */
 	if ( rtl->eeprom.bus &&
@@ -1607,6 +2299,7 @@ static struct pci_device_id realtek_nics[] = {
 	PCI_ROM ( 0x021b, 0x8139, "hne300",	"Compaq HNE-300", 0 ),
 	PCI_ROM ( 0x02ac, 0x1012, "s1012",	"SpeedStream 1012", 0 ),
 	PCI_ROM ( 0x0357, 0x000a, "ttpmon",	"TTTech TTP-Monitoring", 0 ),
+	PCI_ROM ( 0x10ec, 0x8126, "rtl8126",	"RTL8126 5Gbps", 0 ),
 	PCI_ROM ( 0x10ec, 0x8125, "rtl8125",	"RTL8125 2.5Gbps", 0 ),
 	PCI_ROM ( 0x10ec, 0x8129, "rtl8129",	"RTL-8129", 0 ),
 	PCI_ROM ( 0x10ec, 0x8136, "rtl8136",	"RTL8101E/RTL8102E", 0 ),

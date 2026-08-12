@@ -1,12 +1,15 @@
-# ipxe-stateless 0001: RTL8125 全系适配
+# ipxe-stateless 0001: RTL8125 series adaptation
 #
-# Copyright (C) 2026 LECREATE <3302354366@qq.com>
+# Copyright (C) 2026 LECREATE <lecreate@foxmail.com>
 # SPDX-License-Identifier: GPL-2.0
 #
-# 对 iPXE src/drivers/net/realtek.c 的修改继承上游许可（GPL-2.0-or-later /
-# UBDL）；其中 RTL8125 适配部分（XID 版本表、EPHY 初始化、电源管理等）参考
-# Linux 内核 r8169 驱动（drivers/net/ethernet/realtek/r8169_main.c，
-# GPL-2.0-only），该部分仅按 GPL-2.0 授权，不得以 UBDL 或更高版本再分发。
+# Modifications to iPXE src/drivers/net/realtek.c inherit the upstream
+# licence (GPL-2.0-or-later / UBDL).  The RTL8125 adaptation parts (XID
+# version table, EPHY initialisation, power management, etc.) are derived
+# from the Linux kernel r8169 driver
+# (drivers/net/ethernet/realtek/r8169_main.c, GPL-2.0-only); those parts
+# are licensed under GPL-2.0 only and may not be redistributed under
+# UBDL or any later licence.
 
 diff --git a/src/drivers/net/realtek.c b/src/drivers/net/realtek.c
 index dcb221199..8449f6cdd 100644
