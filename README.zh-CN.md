@@ -15,7 +15,7 @@ iPXE-Stateless 为无状态（Stateless）云原生环境提供统一引导固�
 
 ## 关联项目
 
-- **[iPXE-All-Ready](https://github.com/dutyc/ipxe-all-ready)** —— 基于本仓库固件的完整无状态云原生无盘计算平台：中央 Controller（FastAPI 控制面 + DHCP/TFTP/HTTP 引导服务）、iSCSI Server 存储节点（stgt / LIO）、无盘 Worker 节点、Web 管理界面与文档站。
+- **[iPXE-All-Ready](https://github.com/dutyc/ipxe-all-ready)** —— 基于本仓库固件的完整无状态云原生计算平台：中央 Controller（FastAPI 控制面 + DHCP/TFTP/HTTP 引导服务）、iSCSI Server 存储节点（stgt / LIO）、无状态 Worker 节点、Web 管理界面与文档站。
 
 本仓库是 iPXE-All-Ready 的**固件底座**：其引导介质制作指南使用的固件即本仓库构建产物（`dist/`，RTL8125 驱动 + EMBED 自动引导版），引导 Worker 进入 iPXE 引导链后由平台接管（DHCP 下发脚本 + iSCSI 系统盘）。两个仓库职责严格分离——**ipxe-stateless 管“固件怎么构建”，iPXE-All-Ready 管“平台怎么运转”**。
 

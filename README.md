@@ -15,7 +15,7 @@ iPXE-Stateless provides unified network boot firmware for stateless cloud-native
 
 ## Related Projects
 
-- **[iPXE-All-Ready](https://github.com/dutyc/ipxe-all-ready)** — a complete stateless cloud-native diskless compute platform: central Controller (FastAPI control plane + DHCP/TFTP/HTTP boot services), iSCSI Server nodes (stgt / LIO), diskless Worker nodes, Web UI and documentation site.
+- **[iPXE-All-Ready](https://github.com/dutyc/ipxe-all-ready)** — a complete stateless cloud-native compute platform: central Controller (FastAPI control plane + DHCP/TFTP/HTTP boot services), iSCSI Server nodes (stgt / LIO), stateless Worker nodes, Web UI and documentation site.
 
 This repository is the **firmware foundation** of iPXE-All-Ready. Its boot-media guide consumes the firmware artifacts built here (`dist/`, RTL8125 driver + EMBED auto-boot editions) to bring Workers into the iPXE boot chain; the platform then takes over via DHCP-served scripts and iSCSI system disks. The two repositories have strictly separated responsibilities — **ipxe-stateless owns how the firmware is built; iPXE-All-Ready owns how the platform runs.**
 
