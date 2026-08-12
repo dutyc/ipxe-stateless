@@ -1,18 +1,3 @@
-# ipxe-stateless 0004: RTL8126 5GbE adaptation
-#
-# Copyright (C) 2026 LECREATE <lecreate@foxmail.com>
-# SPDX-License-Identifier: GPL-2.0
-#
-# Modifications to iPXE src/drivers/net/realtek.c inherit the upstream
-# licence (GPL-2.0-or-later / UBDL).  The RTL8126 adaptation parts (PHY
-# static configuration tables, GPHY OCP/CSI interfaces, ZRXDC/ASPM
-# configuration, etc.) are derived from the Realtek r8126 driver
-# (r8126_n.c, GPL-2.0-only, Copyright 2025 Realtek Semiconductor Corp.)
-# and the Linux kernel r8169 driver
-# (drivers/net/ethernet/realtek/r8169_main.c, GPL-2.0-only); those parts
-# are licensed under GPL-2.0 only and may not be redistributed under
-# UBDL or any later licence.
-
 diff --git a/src/drivers/net/realtek.c b/src/drivers/net/realtek.c
 index 8449f6cdd..f33fda22c 100644
 --- a/src/drivers/net/realtek.c
@@ -47,7 +32,7 @@ index 8449f6cdd..f33fda22c 100644
 +	writel ( ( reg << 15 ), rtl->regs + RTL_GPHY_OCP );
 +
 +	/* Wait for read to complete */
-+	for ( i = 0 ; i < RTL_MII_MAX_WAIT_US ; i++ ) {
++	for ( i = 0 ; i < RTL_GPHY_OCP_MAX_WAIT_US ; i++ ) {
 +		value = readl ( rtl->regs + RTL_GPHY_OCP );
 +		if ( value & RTL_OCPAR_FLAG )
 +			return ( value & RTL_EPHYAR_DATA_MASK );
@@ -78,7 +63,7 @@ index 8449f6cdd..f33fda22c 100644
 +		 rtl->regs + RTL_GPHY_OCP );
 +
 +	/* Wait for write to complete */
-+	for ( i = 0 ; i < RTL_MII_MAX_WAIT_US ; i++ ) {
++	for ( i = 0 ; i < RTL_GPHY_OCP_MAX_WAIT_US ; i++ ) {
 +		if ( ! ( readl ( rtl->regs + RTL_GPHY_OCP ) & RTL_OCPAR_FLAG ) )
 +			return;
 +		udelay ( 1 );
@@ -264,7 +249,7 @@ index 8449f6cdd..f33fda22c 100644
  	realtek_mac_ocp_modify ( rtl, 0xe0c0, 0x4f0f, 0x4403 );
  	realtek_mac_ocp_modify ( rtl, 0xe052, 0x0080, 0x0068 );
  	realtek_mac_ocp_modify ( rtl, 0xd430, 0x0fff, 0x047f );
-@@ -646,6 +799,531 @@ static void realtek_hw_start_8125 ( struct realtek_nic *rtl ) {
+@@ -646,6 +799,572 @@ static void realtek_hw_start_8125 ( struct realtek_nic *rtl ) {
  		   ~RTL_MISC_RXDV_GATED_EN ), rtl->regs + RTL_MISC );
  }
  
@@ -398,6 +383,12 @@ index 8449f6cdd..f33fda22c 100644
 +	{ 0xb87e, 0x0000, 0x6600, 1 },
 +	{ 0xb87c, 0x0000, 0x83fa, 1 },
 +	{ 0xb87e, 0x0000, 0x6601, 1 },
++	{ 0xbd96, 0x1f00, 0x1000, 0 },
++	{ 0xbf1c, 0x0007, 0x0007, 0 },
++	{ 0xbfbe, 0x8000, 0x0000, 0 },
++	{ 0xbf40, 0x0380, 0x0280, 0 },
++	{ 0xbf90, 0x0080, 0x0060, 0 },
++	{ 0xbf90, 0x0010, 0x000c, 0 },
 +	{ 0xa436, 0x0000, 0x843b, 1 },
 +	{ 0xa438, 0xff00, 0x2000, 0 },
 +	{ 0xa436, 0x0000, 0x843d, 1 },
@@ -709,7 +700,7 @@ index 8449f6cdd..f33fda22c 100644
 +		rtl->mcfg = 3;
 +		break;
 +	default:
-+		rtl->mcfg = 2;
++		rtl->mcfg = 3;
 +		break;
 +	}
 +
@@ -728,6 +719,41 @@ index 8449f6cdd..f33fda22c 100644
 +	const struct realtek_phy_ocp_init *phy = NULL;
 +	unsigned int count = 0;
 +	unsigned int i;
++	int mcu_version;
++	unsigned int mcu_expected;
++
++	/* Check PHY MCU firmware version, as does the Realtek r8126 driver
++	 * rtl8126_get_hw_phy_mcu_code_ver().  iPXE has no mechanism to load
++	 * the rtl8126a-*.fw firmware files, so the PHY MCU RAM code is not
++	 * (re)written here; warn if the hardware version does not match the
++	 * version expected by the driver.
++	 */
++	switch ( rtl->mcfg ) {
++	case 1:
++		mcu_expected = RTL_MCU_VER_8126A_1;
++		break;
++	case 2:
++		mcu_expected = RTL_MCU_VER_8126A_2;
++		break;
++	case 3:
++		mcu_expected = RTL_MCU_VER_8126A_3;
++		break;
++	default:
++		mcu_expected = 0;
++		break;
++	}
++	if ( mcu_expected != 0 ) {
++		realtek_gphy_ocp_write ( rtl, 0xa436, 0x801e );
++		mcu_version = realtek_gphy_ocp_read ( rtl, 0xa438 );
++		if ( mcu_version < 0 ) {
++			DBGC ( rtl, "REALTEK %p could not read PHY MCU firmware "
++			       "version\n", rtl );
++		} else if ( ( unsigned int ) mcu_version != mcu_expected ) {
++			DBGC ( rtl, "REALTEK %p PHY MCU firmware version %#04x "
++			       "does not match expected %#04x\n", rtl,
++			       mcu_version, mcu_expected );
++		}
++	}
 +
 +	/* Configure GPHY OCP registers, as applicable */
 +	switch ( rtl->mcfg ) {
@@ -796,7 +822,7 @@ index 8449f6cdd..f33fda22c 100644
  /******************************************************************************
   *
   * Device reset
-@@ -1014,11 +1692,16 @@ static int realtek_open ( struct net_device *netdev ) {
+@@ -1014,11 +1733,16 @@ static int realtek_open ( struct net_device *netdev ) {
  	if ( ( rc = realtek_create_buffer ( rtl ) ) != 0 )
  		goto err_create_buffer;
  
@@ -817,7 +843,7 @@ index 8449f6cdd..f33fda22c 100644
  
  	/* Accept all packets */
  	writel ( 0xffffffffUL, rtl->regs + RTL_MAR0 );
-@@ -1401,10 +2084,11 @@ static void realtek_detect ( struct realtek_nic *rtl ) {
+@@ -1401,10 +2125,11 @@ static void realtek_detect ( struct realtek_nic *rtl ) {
  	uint16_t cpcr;
  	uint16_t check_cpcr;
  
@@ -832,7 +858,7 @@ index 8449f6cdd..f33fda22c 100644
  		rtl->have_phy_regs = 1;
  		rtl->have_ocp = 1;
  		rtl->tppoll = RTL_TPPOLL_8125;
-@@ -1498,6 +2182,9 @@ static int realtek_probe ( struct pci_device *pci ) {
+@@ -1498,6 +2223,9 @@ static int realtek_probe ( struct pci_device *pci ) {
  	/* Configure DMA */
  	rtl->dma = &pci->dma;
  
@@ -842,7 +868,7 @@ index 8449f6cdd..f33fda22c 100644
  	/* Reset the NIC */
  	if ( ( rc = realtek_reset ( rtl ) ) != 0 )
  		goto err_reset;
-@@ -1505,9 +2192,14 @@ static int realtek_probe ( struct pci_device *pci ) {
+@@ -1505,9 +2233,14 @@ static int realtek_probe ( struct pci_device *pci ) {
  	/* Detect device type */
  	realtek_detect ( rtl );
  
@@ -860,7 +886,7 @@ index 8449f6cdd..f33fda22c 100644
  
  	/* Initialise EEPROM */
  	if ( rtl->eeprom.bus &&
-@@ -1607,6 +2299,7 @@ static struct pci_device_id realtek_nics[] = {
+@@ -1607,6 +2340,7 @@ static struct pci_device_id realtek_nics[] = {
  	PCI_ROM ( 0x021b, 0x8139, "hne300",	"Compaq HNE-300", 0 ),
  	PCI_ROM ( 0x02ac, 0x1012, "s1012",	"SpeedStream 1012", 0 ),
  	PCI_ROM ( 0x0357, 0x000a, "ttpmon",	"TTTech TTP-Monitoring", 0 ),
@@ -872,7 +898,7 @@ diff --git a/src/drivers/net/realtek.h b/src/drivers/net/realtek.h
 index 967a41e56..d5354b552 100644
 --- a/src/drivers/net/realtek.h
 +++ b/src/drivers/net/realtek.h
-@@ -250,6 +250,15 @@ enum realtek_legacy_status {
+@@ -250,6 +250,23 @@ enum realtek_legacy_status {
  /** OCP standard PHY base address */
  #define RTL_OCP_STD_PHY_BASE 0xa400
  
@@ -885,10 +911,18 @@ index 967a41e56..d5354b552 100644
 +#define RTL_CSIAR_BYTE_ENABLE  0x0000f000UL /**< Byte enable mask */
 +#define RTL_CSIAR_ADDR_MASK    0x00000fffUL /**< Address mask */
 +
++/** GPHY OCP wait time (us) */
++#define RTL_GPHY_OCP_MAX_WAIT_US 20000
++
++/** RTL8126A PHY MCU firmware versions (from the Realtek r8126 driver) */
++#define RTL_MCU_VER_8126A_1 0x0023
++#define RTL_MCU_VER_8126A_2 0x0033
++#define RTL_MCU_VER_8126A_3 0x0060
++
  /** MISC Register (dword, 8168e and later) */
  #define RTL_MISC 0xf0
  #define RTL_MISC_RXDV_GATED_EN	( 1 << 19 ) /**< RX descriptor gate enable */
-@@ -362,8 +371,12 @@ struct realtek_nic {
+@@ -362,8 +379,12 @@ struct realtek_nic {
  	int have_phy_regs;
  	/** OCP register access is present */
  	int have_ocp;

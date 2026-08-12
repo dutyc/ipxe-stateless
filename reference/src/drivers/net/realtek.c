@@ -260,7 +260,7 @@ static int realtek_gphy_ocp_read ( struct realtek_nic *rtl, uint32_t reg ) {
 	writel ( ( reg << 15 ), rtl->regs + RTL_GPHY_OCP );
 
 	/* Wait for read to complete */
-	for ( i = 0 ; i < RTL_MII_MAX_WAIT_US ; i++ ) {
+	for ( i = 0 ; i < RTL_GPHY_OCP_MAX_WAIT_US ; i++ ) {
 		value = readl ( rtl->regs + RTL_GPHY_OCP );
 		if ( value & RTL_OCPAR_FLAG )
 			return ( value & RTL_EPHYAR_DATA_MASK );
@@ -291,7 +291,7 @@ static void realtek_gphy_ocp_write ( struct realtek_nic *rtl, uint32_t reg,
 		 rtl->regs + RTL_GPHY_OCP );
 
 	/* Wait for write to complete */
-	for ( i = 0 ; i < RTL_MII_MAX_WAIT_US ; i++ ) {
+	for ( i = 0 ; i < RTL_GPHY_OCP_MAX_WAIT_US ; i++ ) {
 		if ( ! ( readl ( rtl->regs + RTL_GPHY_OCP ) & RTL_OCPAR_FLAG ) )
 			return;
 		udelay ( 1 );
@@ -929,6 +929,12 @@ static const struct realtek_phy_ocp_init realtek_8126a_2_phy[] = {
 	{ 0xb87e, 0x0000, 0x6600, 1 },
 	{ 0xb87c, 0x0000, 0x83fa, 1 },
 	{ 0xb87e, 0x0000, 0x6601, 1 },
+	{ 0xbd96, 0x1f00, 0x1000, 0 },
+	{ 0xbf1c, 0x0007, 0x0007, 0 },
+	{ 0xbfbe, 0x8000, 0x0000, 0 },
+	{ 0xbf40, 0x0380, 0x0280, 0 },
+	{ 0xbf90, 0x0080, 0x0060, 0 },
+	{ 0xbf90, 0x0010, 0x000c, 0 },
 	{ 0xa436, 0x0000, 0x843b, 1 },
 	{ 0xa438, 0xff00, 0x2000, 0 },
 	{ 0xa436, 0x0000, 0x843d, 1 },
@@ -1240,7 +1246,7 @@ static int realtek_detect_8126 ( struct realtek_nic *rtl ) {
 		rtl->mcfg = 3;
 		break;
 	default:
-		rtl->mcfg = 2;
+		rtl->mcfg = 3;
 		break;
 	}
 
@@ -1259,6 +1265,41 @@ static void realtek_hw_phy_config_8126 ( struct realtek_nic *rtl ) {
 	const struct realtek_phy_ocp_init *phy = NULL;
 	unsigned int count = 0;
 	unsigned int i;
+	int mcu_version;
+	unsigned int mcu_expected;
+
+	/* Check PHY MCU firmware version, as does the Realtek r8126 driver
+	 * rtl8126_get_hw_phy_mcu_code_ver().  iPXE has no mechanism to load
+	 * the rtl8126a-*.fw firmware files, so the PHY MCU RAM code is not
+	 * (re)written here; warn if the hardware version does not match the
+	 * version expected by the driver.
+	 */
+	switch ( rtl->mcfg ) {
+	case 1:
+		mcu_expected = RTL_MCU_VER_8126A_1;
+		break;
+	case 2:
+		mcu_expected = RTL_MCU_VER_8126A_2;
+		break;
+	case 3:
+		mcu_expected = RTL_MCU_VER_8126A_3;
+		break;
+	default:
+		mcu_expected = 0;
+		break;
+	}
+	if ( mcu_expected != 0 ) {
+		realtek_gphy_ocp_write ( rtl, 0xa436, 0x801e );
+		mcu_version = realtek_gphy_ocp_read ( rtl, 0xa438 );
+		if ( mcu_version < 0 ) {
+			DBGC ( rtl, "REALTEK %p could not read PHY MCU firmware "
+			       "version\n", rtl );
+		} else if ( ( unsigned int ) mcu_version != mcu_expected ) {
+			DBGC ( rtl, "REALTEK %p PHY MCU firmware version %#04x "
+			       "does not match expected %#04x\n", rtl,
+			       mcu_version, mcu_expected );
+		}
+	}
 
 	/* Configure GPHY OCP registers, as applicable */
 	switch ( rtl->mcfg ) {

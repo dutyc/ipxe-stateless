@@ -259,6 +259,14 @@ enum realtek_legacy_status {
 #define RTL_CSIAR_BYTE_ENABLE  0x0000f000UL /**< Byte enable mask */
 #define RTL_CSIAR_ADDR_MASK    0x00000fffUL /**< Address mask */
 
+/** GPHY OCP wait time (us) */
+#define RTL_GPHY_OCP_MAX_WAIT_US 20000
+
+/** RTL8126A PHY MCU firmware versions (from the Realtek r8126 driver) */
+#define RTL_MCU_VER_8126A_1 0x0023
+#define RTL_MCU_VER_8126A_2 0x0033
+#define RTL_MCU_VER_8126A_3 0x0060
+
 /** MISC Register (dword, 8168e and later) */
 #define RTL_MISC 0xf0
 #define RTL_MISC_RXDV_GATED_EN	( 1 << 19 ) /**< RX descriptor gate enable */

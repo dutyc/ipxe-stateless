@@ -9,23 +9,36 @@
 
 [English](README.md) | [中文](README.zh-CN.md)
 
-**Stateless cloud-native iPXE** — an automated firmware build repository based on **upstream iPXE + patch-based customization**.
+## Overview
 
-iPXE-Stateless provides unified network boot firmware for stateless cloud-native environments: clients keep no state, obtaining configuration via DHCP at boot, chainloading boot scripts, and entering diskless systems. The repository itself is likewise stateless: it contains no iPXE source code, only difference patches and build assets, and can be rebuilt from any upstream baseline at any time.
+iPXE-Stateless is a **network boot firmware build repository** for stateless cloud-native computing environments, built on **upstream iPXE + patch-based customization**. The repository contains no iPXE source code; it maintains only difference patches, build scripts, and build assets. Every customization is auditable and reproducible, and the firmware can be rebuilt on top of any upstream baseline at any time.
+
+The repository honours two statelessness constraints:
+
+- **Stateless clients** — boot clients keep no state: on boot they obtain configuration via DHCP, chainload the boot script, and enter a diskless operating system;
+- **Stateless repository** — no fork branch is maintained; all modifications exist as patches, and upgrading the upstream baseline only requires regenerating the patches.
+
+## Mission & Scope
+
+**Mission**: to provide high-quality, reproducible, clearly licensed network boot firmware for stateless cloud-native computing environments, serving as the firmware foundation of the iPXE-All-Ready platform.
+
+**Scope**: this repository focuses on driver porting and adaptation for **high-performance NICs at 2.5G / 5G / 10G and above**, currently covering the RTL8125 (2.5G) and RTL8126 (5G) series.
+
+**Out of Scope**: legacy 1G / 100M NICs retain only the support already present in the upstream baseline; no new adaptation or updates will be made for them.
 
 ## Related Projects
 
-- **[iPXE-All-Ready](https://github.com/dutyc/ipxe-all-ready)** — a complete stateless cloud-native compute platform: central Controller (FastAPI control plane + DHCP/TFTP/HTTP boot services), iSCSI Server nodes (stgt / LIO), stateless Worker nodes, Web UI and documentation site.
+- **[iPXE-All-Ready](https://github.com/dutyc/ipxe-all-ready)** — the upstream project: a true cloud-native implementation that carries statelessness down to the compute layer itself — real cloud-native means compute is not bound to any specific hardware. Compute nodes hold no persistent state of their own — identity, OS and data are all conferred externally by the network and the control plane: iPXE writes the iBFT at boot, the control plane injects the real identity through the dynamic variable chain, disks are fully decoupled from machines, and nodes are recognised and registered the moment they are plugged in — discardable, replaceable, rebuildable in seconds, with zero manual pre-registration. Control plane and data plane are strictly separated; diskless is only its outermost form.
 
-This repository is the **firmware foundation** of iPXE-All-Ready. Its boot-media guide consumes the firmware artifacts built here (`dist/`, RTL8125 driver + EMBED auto-boot editions) to bring Workers into the iPXE boot chain; the platform then takes over via DHCP-served scripts and iSCSI system disks. The two repositories have strictly separated responsibilities — **ipxe-stateless owns how the firmware is built; iPXE-All-Ready owns how the platform runs.**
+This repository and iPXE-All-Ready are two sides of the same idea: **the platform carries statelessness to the compute layer, this repository to the boot firmware itself**. Firmware is built here and consumed by the platform, with strictly separated responsibilities united by the same idea.
 
-## Features
+## Key Features
 
 - **Patch-based, no fork** — all modifications to upstream iPXE are maintained as `git apply`-able patches under `patches/`, generated against a fixed upstream baseline (`e6e51ccb`). Upgrading upstream means regenerating the patches, not merging a fork.
-- **Native NIC driver adaptation** — RTL8125 (2.5G) and RTL8126 (5G) series patches provide reliable native-driver network boot (see [docs/customizations.md](docs/customizations.md)).
-- **Local boot fallback** — SNP firmware adaptation for booting from local media (USB / disk / GRUB2 chainload) when the mainboard lacks a PXE boot option.
-- **EMBED auto-boot script** — `embed/auto.ipxe` is compiled into the firmware; plug in and boot, no manual configuration.
-- **Reproducible one-command build** — the pipeline fetches source, applies patches, builds, and archives 10 firmware artifacts together with `SHA256SUMS`.
+- **Native drivers for high-performance NICs** — native-driver patches (0001 / 0004) for the RTL8125 (2.5G) and RTL8126 (5G) series provide reliable high-speed network boot (see [docs/customizations.md](docs/customizations.md)).
+- **Local boot fallback (SNP adaptation)** — for mainboards without a PXE boot option, supports booting from local media (USB / disk / GRUB2 chainload) and taking over the network.
+- **EMBED auto-boot script** — `embed/auto.ipxe` is compiled into the firmware; works out of the box with no on-site configuration.
+- **Reproducible one-command build** — the pipeline automates source fetching, patch verification and application, firmware building and archiving, producing 10 firmware form factors together with a `SHA256SUMS` manifest.
 
 ## Quick Start
 
@@ -41,9 +54,9 @@ UPSTREAM_URL=<mirror-url> ./build/build.sh # Alternate source mirror
 
 Requirements: Linux with `git` / `make` / `gcc`, and network access to the upstream repository (GitHub by default, mirrors supported).
 
-## Usage
+## Build Artifacts
 
-All artifacts are written to `dist/`:
+Artifacts are categorized and written to `dist/`:
 
 | Artifact | Form factor | Description |
 |---|---|---|
@@ -58,7 +71,13 @@ All artifacts are written to `dist/`:
 | `dist/undionly.kpxe` | PXE boot (BIOS) | No EMBED; no native drivers, uses the UNDI interface of the NIC PXE ROM; compatible with any NIC that has a PXE ROM |
 | `dist/usb/ipxe.usb` | BIOS boot media (EMBED) | Write whole-disk to a USB stick |
 
-`dist/SHA256SUMS` lists the sha256 checksums of all artifacts.
+`dist/SHA256SUMS` lists the SHA-256 checksums of all artifacts.
+
+## Validation Status
+
+- **RTL8125B (2.5G)** — field-tested on physical hardware: NIC initialization, DHCP configuration, and entry into the iPXE boot menu all verified.
+- **RTL8126 (5G)** — driver adaptation complete; field verification pending (including PHY MCU firmware version consistency check).
+- For the full support matrix and test records, see [docs/network-support.md](docs/network-support.md).
 
 ## Documentation
 
@@ -66,10 +85,11 @@ All artifacts are written to `dist/`:
 |---|---|
 | [docs/customizations.md](docs/customizations.md) | Design rationale and detailed description of every customization (patches 0001-0004 + EMBED) |
 | [docs/network-support.md](docs/network-support.md) | NIC support matrix (well-covered / unsupported / conditional + field-test records) |
+| [docs/8126-porting-audit.md](docs/8126-porting-audit.md) | RTL8126 dual-source porting audit and fix records (Chinese only) |
 | [patches/README.md](patches/README.md) | Patch set details, licensing, and upstream baseline upgrade workflow |
-| [docs/8168-research-log.md](docs/8168-research-log.md) | RTL8168 research log (investigation terminated) |
+| [docs/8168-research-log.md](docs/8168-research-log.md) | RTL8168 research log (investigation terminated; Chinese only) |
 
-## Project Structure
+## Repository Structure
 
 ```
 ipxe-stateless/
@@ -86,7 +106,7 @@ ipxe-stateless/
 
 The build cache lives in `.cache/` (deletable and rebuildable without affecting the repository).
 
-## How It Works
+## Build Workflow
 
 1. **Fetch source** — shallow-clone upstream `ipxe/ipxe`, check out the pinned baseline, `clean` before each build to guarantee a pristine tree.
 2. **Apply patches** — `git apply --check` then apply in filename order; abort immediately if any patch fails.

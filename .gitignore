@@ -9,3 +9,7 @@ diag/
 
 # 杂项
 *.log
+
+thirdparty/
+
+.qoderignore

@@ -9,28 +9,41 @@
 
 [English](README.md) | [中文](README.zh-CN.md)
 
-**无状态云原生 iPXE** —— 基于**上游 iPXE + 补丁（Patch）机制**的自动化固件构建仓库。
+## 项目定位
 
-iPXE-Stateless 为无状态（Stateless）云原生环境提供统一引导固件：客户端不保存任何状态，启动即通过 DHCP 获取配置、链式加载引导脚本、无盘进入系统。仓库自身同样无状态——不包含 iPXE 源码，仅维护差异补丁与构建资产，可随时基于任意上游基线重建。
+iPXE-Stateless 是一个面向无状态（Stateless）云原生计算环境的**网络引导固件构建仓库**，采用「上游 iPXE + 补丁（Patch）机制」的定制模式。本仓库不包含 iPXE 源码，仅维护差异补丁、构建脚本与构建资产；全部定制内容可审计、可复现，并可在任意上游基线之上重建。
+
+本仓库遵循两类无状态约束：
+
+- **客户端无状态** —— 引导客户端不保存任何状态：启动即通过 DHCP 获取配置、链式加载引导脚本、无盘进入操作系统；
+- **仓库自身无状态** —— 不维护 fork 分支，全部修改以补丁形式存在，升级上游基线仅需重新生成补丁。
+
+## 项目使命与适用范围
+
+**使命**：为无状态云原生计算环境提供高质量、可复现、许可证边界清晰的统一网络引导固件，并作为 iPXE-All-Ready 平台的固件底座。
+
+**适用范围**：本仓库聚焦 **2.5G / 5G / 10G 及以上速率高性能网卡**的驱动移植与适配，当前覆盖 RTL8125（2.5G）与 RTL8126（5G）系列。
+
+**非目标（Out of Scope）**：普通千兆 / 百兆网卡仅维持上游基线既有支持，不进行新的适配与更新。
 
 ## 关联项目
 
-- **[iPXE-All-Ready](https://github.com/dutyc/ipxe-all-ready)** —— 基于本仓库固件的完整无状态云原生计算平台：中央 Controller（FastAPI 控制面 + DHCP/TFTP/HTTP 引导服务）、iSCSI Server 存储节点（stgt / LIO）、无状态 Worker 节点、Web 管理界面与文档站。
+- **[iPXE-All-Ready](https://github.com/dutyc/ipxe-all-ready)** —— 主仓库，一套把「无状态」贯彻到**算力层本身**的云原生实现——真正的云原生，是让算力不绑定任何具体硬件。计算节点不持有任何属于自己的持久状态——身份、系统、数据全部由网络与控制面在外部赋予：启动时 iPXE 写入 iBFT，控制面经动态变量链注入真实身份，盘与机器彻底解耦，节点插电即被识别与注册，可丢弃、可替换、可瞬间重建，全程零人工预注册。控制面与数据面严格分离，无盘只是其最外层形态。
 
-本仓库是 iPXE-All-Ready 的**固件底座**：其引导介质制作指南使用的固件即本仓库构建产物（`dist/`，RTL8125 驱动 + EMBED 自动引导版），引导 Worker 进入 iPXE 引导链后由平台接管（DHCP 下发脚本 + iSCSI 系统盘）。两个仓库职责严格分离——**ipxe-stateless 管“固件怎么构建”，iPXE-All-Ready 管“平台怎么运转”**。
+本仓库与 iPXE-All-Ready 是同一理念的一体两面：**主仓库把「无状态」贯彻到算力层，本仓库把「无状态」贯彻到引导固件**。固件在本仓库构建、由主仓库消费，职责严格分离，同一理念贯穿始终。
 
-## 特性
+## 核心特性
 
-- **补丁机制、不 fork** —— 对上游 iPXE 的全部修改以 `git apply` 可直接应用的补丁维护在 `patches/` 下，基于固定上游基线（`e6e51ccb`）生成；升级上游只需重新生成补丁，无需合并 fork 分支。
-- **native 网卡驱动适配** —— RTL8125（2.5G）与 RTL8126（5G）系列补丁，提供可靠的 native 驱动网络引导（详见 [docs/customizations.zh-CN.md](docs/customizations.zh-CN.md)）。
-- **本地引导兜底** —— SNP 固件适配：主板无 PXE 启动选项时，可从本地介质（U 盘 / 磁盘 / GRUB2 链加载）引导并接管网络。
-- **EMBED 自动引导脚本** —— `embed/auto.ipxe` 编译进固件，即插即用、无需手工配置。
-- **一键可复现构建** —— 流水线自动拉取源码、应用补丁、构建并归档 10 个固件产物及 `SHA256SUMS`。
+- **补丁化定制，无 fork** —— 对上游 iPXE 的全部修改以 `git apply` 可直接应用的补丁维护于 `patches/`，基于固定上游基线（`e6e51ccb`）生成；升级上游仅需重新生成补丁，无需合并 fork 分支。
+- **高性能网卡原生驱动** —— RTL8125（2.5G）与 RTL8126（5G）系列原生驱动补丁（0001 / 0004），提供可靠的高速网络引导能力（详见 [docs/customizations.zh-CN.md](docs/customizations.zh-CN.md)）。
+- **本地引导兜底（SNP 适配）** —— 针对主板缺失 PXE 启动选项的场景，支持从本地介质（U 盘 / 磁盘 / GRUB2 链式加载）引导并接管网络。
+- **EMBED 自动引导脚本** —— `embed/auto.ipxe` 编译进固件，开箱即用，无需现场配置。
+- **一键可复现构建** —— 流水线自动完成源码获取、补丁验证与应用、固件构建与归档，产出 10 种固件形态及 `SHA256SUMS` 校验清单。
 
 ## 快速开始
 
 ```bash
-# 完整构建（拉源码 -> 打补丁 -> 构建 -> 归档）
+# 完整构建（拉取源码 -> 应用补丁 -> 构建 -> 归档）
 ./build/build.sh
 
 # 常用变量
@@ -41,9 +54,9 @@ UPSTREAM_URL=<镜像地址> ./build/build.sh  # 更换源码源
 
 环境要求：Linux + `git` / `make` / `gcc`，网络可访问上游仓库（默认 GitHub，支持镜像）。
 
-## 使用
+## 构建产物
 
-产物输出到 `dist/`：
+产物分类输出至 `dist/`：
 
 | 产物 | 目标形态 | 说明 |
 |---|---|---|
@@ -58,7 +71,13 @@ UPSTREAM_URL=<镜像地址> ./build/build.sh  # 更换源码源
 | `dist/undionly.kpxe` | PXE 网络启动（BIOS） | 无 EMBED；无 native 驱动，经网卡 ROM 的 UNDI 接口收发；兼容一切带 PXE ROM 的网卡 |
 | `dist/usb/ipxe.usb` | BIOS 引导介质（含 EMBED） | 整盘写入 U 盘 |
 
-`dist/SHA256SUMS` 为全部产物的 sha256 校验清单。
+`dist/SHA256SUMS` 为全部产物的 SHA-256 校验清单。
+
+## 验证状态
+
+- **RTL8125B（2.5G）** —— 已完成物理机实测：网卡初始化、DHCP 获取配置、进入 iPXE 引导菜单均正常。
+- **RTL8126（5G）** —— 驱动适配完成，实机验证待进行（含 PHY MCU 固件版本一致性检查）。
+- 完整支持矩阵与实测记录见 [docs/network-support.zh-CN.md](docs/network-support.zh-CN.md)。
 
 ## 文档
 
@@ -66,6 +85,7 @@ UPSTREAM_URL=<镜像地址> ./build/build.sh  # 更换源码源
 |---|---|
 | [docs/customizations.zh-CN.md](docs/customizations.zh-CN.md) | 设计动机与全部定制内容详解（0001-0004 补丁 + EMBED） |
 | [docs/network-support.zh-CN.md](docs/network-support.zh-CN.md) | 网卡支持矩阵（覆盖良好 / 不支持 / 有条件 + 实测记录） |
+| [docs/8126-porting-audit.md](docs/8126-porting-audit.md) | RTL8126 双来源移植审计与修复记录 |
 | [patches/README.zh-CN.md](patches/README.zh-CN.md) | 补丁集说明、授权、上游基线升级流程 |
 | [docs/8168-research-log.md](docs/8168-research-log.md) | RTL8168 研究记录（已终止） |
 
@@ -86,7 +106,7 @@ ipxe-stateless/
 
 构建缓存位于 `.cache/`（可删除重建，不影响仓库）。
 
-## 工作机制
+## 构建流程
 
 1. **获取源码** —— 浅克隆上游 `ipxe/ipxe`，检出固定基线，每次构建前 `clean` 保证干净树。
 2. **应用补丁** —— 按文件名顺序 `git apply --check` 验证后应用；任一补丁失败立即中止。
