@@ -8,7 +8,7 @@
 diff --git a/src/Makefile b/src/Makefile
 --- a/src/Makefile
 +++ b/src/Makefile
-@@ -246,7 +246,11 @@
+@@ -246,7 +246,15 @@
  # All drivers (defined on a per-platform basis)
  #
  DRIVERS_ipxe	+=
@@ -16,6 +16,10 @@ diff --git a/src/Makefile b/src/Makefile
 +# Debug builds use the same driver set as the main build
 +#
 +DRIVERS_ipxe-debug	+= $(DRIVERS_ipxe)
++
++# snponly debug builds use the snponly driver
++#
++DRIVERS_snponly-debug	+= snponly
 +
  # All drivers (excluding USB network devices)
  #
