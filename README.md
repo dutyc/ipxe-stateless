@@ -11,26 +11,15 @@
 
 ## Overview
 
-iPXE-Stateless is a **network boot firmware build repository** for stateless cloud-native computing environments, built on **upstream iPXE + patch-based customization**. The repository contains no iPXE source code; it maintains only difference patches, build scripts, and build assets. Every customization is auditable and reproducible, and the firmware can be rebuilt on top of any upstream baseline at any time.
+iPXE-Stateless is a **network boot firmware build repository** for stateless cloud-native computing environments: it provides high-quality, reproducible, clearly licensed boot firmware and serves as the firmware foundation of the iPXE-All-Ready platform. The repository contains no iPXE source code — only difference patches and build assets — rebuildable on any upstream baseline.
 
-The repository honours two statelessness constraints:
-
-- **Stateless clients** — boot clients keep no state: on boot they obtain configuration via DHCP, chainload the boot script, and enter a diskless operating system;
-- **Stateless repository** — no fork branch is maintained; all modifications exist as patches, and upgrading the upstream baseline only requires regenerating the patches.
-
-## Mission & Scope
-
-**Mission**: to provide high-quality, reproducible, clearly licensed network boot firmware for stateless cloud-native computing environments, serving as the firmware foundation of the iPXE-All-Ready platform.
-
-**Scope**: this repository focuses on driver porting and adaptation for **high-performance NICs at 2.5G / 5G / 10G and above**, currently covering the RTL8125 (2.5G) and RTL8126 (5G) series.
-
-**Out of Scope**: legacy 1G / 100M NICs retain only the support already present in the upstream baseline; no new adaptation or updates will be made for them.
+**Scope**: this repository focuses on driver porting and adaptation for **high-performance NICs at 2.5G / 5G / 10G and above**, currently covering the RTL8125 (2.5G) and RTL8126 (5G) series; legacy 1G / 100M NICs retain only the support already present in the upstream baseline, with no new adaptation or updates.
 
 ## Related Projects
 
-- **[iPXE-All-Ready](https://github.com/dutyc/ipxe-all-ready)** — the upstream project: a true cloud-native implementation that carries statelessness down to the compute layer itself — real cloud-native means compute is not bound to any specific hardware. Compute nodes hold no persistent state of their own — identity, OS and data are all conferred externally by the network and the control plane: iPXE writes the iBFT at boot, the control plane injects the real identity through the dynamic variable chain, disks are fully decoupled from machines, and nodes are recognised and registered the moment they are plugged in — discardable, replaceable, rebuildable in seconds, with zero manual pre-registration. Control plane and data plane are strictly separated; diskless is only its outermost form.
+- **[iPXE-All-Ready](https://github.com/dutyc/ipxe-all-ready)** — the upstream project: a true cloud-native implementation that carries statelessness to the compute layer itself — compute is not bound to any specific hardware; nodes boot on plug-in, discardable and rebuildable in seconds.
 
-This repository and iPXE-All-Ready are two sides of the same idea: **the platform carries statelessness to the compute layer, this repository to the boot firmware itself**. Firmware is built here and consumed by the platform, with strictly separated responsibilities united by the same idea.
+This repository and iPXE-All-Ready are two sides of the same idea: **the platform makes compute stateless; this repository makes the boot firmware stateless** — firmware is built here and consumed by the platform.
 
 ## Key Features
 
