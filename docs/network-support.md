@@ -12,6 +12,7 @@ Status legend:
 
 - **Well covered** — mature driver or field-tested, safe to use
 - **Conditional** — driver exists with known issues or limitations
+- **Via protocol layer** — no native driver; runs on the NIC-shipped UEFI SNP / BIOS UNDI boot ROM (snponly.efi / undionly.kpxe); carries the SNP caveats listed under Conditional
 - **Unsupported** — no driver in the baseline (including this project's patch scope)
 
 ## Well Covered
@@ -27,29 +28,35 @@ Status legend:
 | Realtek RTL8136 / 8139 / 8129 / 8167 / 8168 / 8169 | realtek.c | Baseline native |
 | **Realtek RTL8125 series** (2.5G) | realtek.c (patch 0001) | **Field-tested DHCP**; native driver adaptation |
 | **Realtek RTL8126** (5G, 2024 NIC) | realtek.c (patch 0004) | **Build-verified** (GPHY OCP/CSI mechanisms, 3 PHY static configuration tables); hardware field test pending |
-| Marvell/Aquantia AQC107 / 108 / 109 / 111 (10G / 5G / 2.5G) | aqc1xx.c | Common on high-end mainboards / industrial boards |
+| Marvell/Aquantia AQC100 / 107 / 108 / 109 / 111 / 112 / 113 / 114 (10G / 5G / 2.5G) | aqc1xx.c | Full device-table coverage incl. AQC113 (Atlantic 2); common on high-end mainboards / industrial boards |
 | Broadcom BCM57xx gigabit (tg3, 82 devices) | tg3 | Wide coverage |
 | Broadcom BNX2 (BCM5706/5708 etc.) | bnx2 | Older 1G/10G family |
 | Broadcom NetXtreme-E (BCM957xxx) | bnxt | Newer server family |
 | Virtualisation: virtio / vmxnet3 / ENA(AWS) / GVE(GCP) / netvsc(Hyper-V) | — | Full cloud-native coverage |
 | USB: AX88179 (axge), LAN7800 (lan78xx), SMSC95xx/75xx, DM96xx, CDC ECM/NCM | — | Only these USB NIC classes |
 
+## Via Protocol Layer (No Native Driver)
+
+Some server-grade NICs ship their own boot ROM (UEFI SNP / BIOS UNDI); these need no driver port — the protocol-layer firmware (snponly.efi / undionly.kpxe) runs on the NIC-shipped PXE stack and provides full iPXE capability. A native port is intentionally skipped when its cost (e.g. the mlx5 firmware-command architecture) is disproportionate to the benefit.
+
+| NIC | Path | Notes |
+|---|---|---|
+| **Mellanox ConnectX-4 / 5 / 6 / 7** (25G / 40G / 100G, servers) | snponly.efi (UEFI) / undionly.kpxe (BIOS) | Zero adaptation; carries the SNP caveats under Conditional (iSCSI hang risk) |
+| Broadcom bnx2x family (BCM57710/57711/57712/57800/57810/57840, 10G, NetXtreme II) | snponly.efi (UEFI) / undionly.kpxe (BIOS) | Server NICs ship official Broadcom boot ROM; zero adaptation; carries the SNP caveats under Conditional (iSCSI hang risk) |
+
 ## Unsupported (Key Risks)
 
 | NIC | Scenario | Notes |
 |---|---|---|
 | **Realtek USB RTL8152 / 8153 / 8156** | Laptop USB-C to RJ45 (most common) | No driver in iPXE |
-| **Mellanox ConnectX-4 / 5 / 6 / 7** (25G / 100G) | Server | No mlx5; only ConnectX-3 and earlier (arbel/hermon/golan/linda) with limited features |
-| Broadcom bnx2x family (BCM57710/57711/57712, 10G) | Server | Not in baseline |
 | Modern WiFi (Intel AX, Realtek 88 series) | Laptop | Only vintage prism2 / rtl818x |
-| Aquantia AQC100 / AQC113 (0x12b1 family) | 10G | Not in the aqc1xx.c device table |
 
 ## Conditional (Known Issues)
 
 - **Realtek RTL8168, some versions**: native driver initialisation hangs (field-proven in this project; investigation terminated) — use the SNP fallback, see [8168-research-log.md](8168-research-log.md)
-- **SNP driver iSCSI hang** (field-proven in this project): affects **every NIC without a native driver that must use the UEFI NIC driver** — i.e. NICs in the Unsupported list above carry the same risk when booting via SNP
+- **SNP driver iSCSI hang** (field-proven in this project): affects **every NIC without a native driver that must use the UEFI NIC driver** — i.e. NICs booted via SNP (Unsupported and Via Protocol Layer sections) carry the same risk
 - **Intel I219 series**: special `INTEL_PBSIZE_RST` / `NO_PHY_RST` handling (historic bug fixes, low practical impact)
-- **Marvell/Aquantia AQC series**: driver is derived from Atheros-family code, moderate maturity, no hardware offload (iSCSI offload etc.)
+- **Marvell/Aquantia AQC series**: Marvell-official lightweight driver (~1/6 of Linux atlantic); link negotiation relies on hardware auto-negotiation (no rate management); dynamic firmware load for AQC113 not implemented (fails with `-ENOTSUP` if NIC firmware is blank); no field-test record in this project
 - **82599 / X550 (SFP+)**: compatibility depends on transceiver quality
 
 ## Field-Test Records

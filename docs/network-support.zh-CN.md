@@ -12,6 +12,7 @@
 
 - **覆盖良好** —— 驱动成熟或实测通过，可放心使用
 - **有条件** —— 驱动存在但有已知问题或限制
+- **协议层支持** —— 无 native 驱动；通过网卡自带 UEFI SNP / BIOS UNDI 引导 ROM 运行（snponly.efi / undionly.kpxe）；附带下方“有条件”中的 SNP 注意事项
 - **不支持** —— 基线无驱动（含本项目补丁范围）
 
 ## 覆盖良好
@@ -27,29 +28,35 @@
 | Realtek RTL8136 / 8139 / 8129 / 8167 / 8168 / 8169 | realtek.c | 基线原生 |
 | **Realtek RTL8125 全系**（2.5G） | realtek.c（0001 补丁） | **物理机实测 DHCP 通过**；原生驱动适配 |
 | **Realtek RTL8126**（5G，2024 新卡） | realtek.c（0004 补丁） | **编译验证通过**（含 GPHY OCP/CSI 机制、PHY 静态配置表 ×3）；待硬件实测 |
-| Marvell/Aquantia AQC107 / 108 / 109 / 111（10G / 5G / 2.5G） | aqc1xx.c | 高端主板 / 工控常见 |
+| Marvell/Aquantia AQC100 / 107 / 108 / 109 / 111 / 112 / 113 / 114（10G / 5G / 2.5G） | aqc1xx.c | 设备表全系覆盖（含 AQC113，Atlantic 2）；高端主板 / 工控常见 |
 | Broadcom BCM57xx 千兆（tg3，82 设备） | tg3 | 覆盖广 |
 | Broadcom BNX2（BCM5706/5708 等） | bnx2 | 1G/10G 旧系 |
 | Broadcom NetXtreme-E（BCM957xxx） | bnxt | 服务器新系 |
 | 虚拟化：virtio / vmxnet3 / ENA(AWS) / GVE(GCP) / netvsc(Hyper-V) | — | 云原生场景全覆盖 |
 | USB：AX88179（axge）、LAN7800（lan78xx）、SMSC95xx/75xx、DM96xx、CDC ECM/NCM | — | USB 网卡仅此几类 |
 
+## 协议层支持（无 native 驱动）
+
+部分服务器级网卡出厂自带引导 ROM（UEFI SNP / BIOS UNDI），无需移植驱动——协议层固件（snponly.efi / undionly.kpxe）直接运行在网卡自带 PXE 栈之上，获得完整 iPXE 能力。当 native 驱动移植成本（如 mlx5 的固件命令接口架构）与收益不成比例时，有意采用协议层方案。
+
+| 网卡 | 路径 | 备注 |
+|---|---|---|
+| **Mellanox ConnectX-4 / 5 / 6 / 7**（25G / 40G / 100G，服务器） | snponly.efi（UEFI）/ undionly.kpxe（BIOS） | 零适配；附带下方“有条件”中的 SNP 注意事项（iSCSI 挂起风险） |
+| Broadcom bnx2x 系（BCM57710/57711/57712/57800/57810/57840，10G，NetXtreme II） | snponly.efi（UEFI）/ undionly.kpxe（BIOS） | 服务器卡自带 Broadcom 官方引导 ROM；零适配；附带下方“有条件”中的 SNP 注意事项（iSCSI 挂起风险） |
+
 ## 不支持（重点风险）
 
 | 网卡 | 场景 | 备注 |
 |---|---|---|
 | **Realtek USB RTL8152 / 8153 / 8156** | 笔记本 USB-C 转 RJ45（最常见） | iPXE 无此驱动 |
-| **Mellanox ConnectX-4 / 5 / 6 / 7**（25G / 100G） | 服务器 | 无 mlx5；仅 ConnectX-3 及更早（arbel/hermon/golan/linda）且功能有限 |
-| Broadcom bnx2x 系（BCM57710/57711/57712，10G） | 服务器 | 基线无 |
 | 现代 WiFi 全系（Intel AX、Realtek 88 系列） | 笔记本 | 仅古董 prism2 / rtl818x |
-| Aquantia AQC100 / AQC113 新版（0x12b1 系） | 10G | 不在 aqc1xx.c 设备表 |
 
 ## 有条件（已知问题）
 
 - **Realtek RTL8168 部分版本**：native 驱动初始化挂起（本项目实证，研究终止）→ 需走 SNP 兜底，见 [8168-research-log.md](8168-research-log.md)
-- **SNP 驱动 iSCSI 挂起缺陷**（本项目实证）：影响**所有没有 native 驱动、只能走 UEFI 网卡驱动**的网卡——即上方"不支持"列表中的卡若走 SNP 引导同样有此风险
+- **SNP 驱动 iSCSI 挂起缺陷**（本项目实证）：影响**所有没有 native 驱动、只能走 UEFI 网卡驱动**的网卡——即走 SNP 引导的网卡（“不支持”与“协议层支持”两节所列）同样有此风险
 - **Intel I219 系列**：带 `INTEL_PBSIZE_RST` / `NO_PHY_RST` 特殊处理（历史 bug 修复，实际影响小）
-- **Marvell/Aquantia AQC 系列**：驱动为 Atheros 系代码改造，成熟度一般、无硬件卸载（iSCSI 卸载等）
+- **Marvell/Aquantia AQC 系列**：Marvell 官方轻量实现（约为 Linux atlantic 的 1/6）；链路协商依赖硬件自协商（无速率管理）；AQC113 动态固件加载未实现（固件空白时返回 `-ENOTSUP`）；本项目无实测记录
 - **82599 / X550（SFP+）**：兼容性依赖光模块质量
 
 ## 实测记录
