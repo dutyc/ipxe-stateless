@@ -2,7 +2,7 @@
 
 [English](customizations.md) | [中文](customizations.zh-CN.md)
 
-Every customization in this repository, relative to the upstream iPXE baseline (default `e6e51ccb`), consists of **four patches** plus a **build-level EMBED customization** (`embed/auto.ipxe`, compiled into the firmware via `EMBED=`, not a patch).
+Every customization in this repository, relative to the upstream iPXE baseline (default `e6e51ccb`), consists of **five patches** plus a **build-level EMBED customization** (`embed/auto.ipxe`, compiled into the firmware via `EMBED=`, not a patch).
 
 | # | Patch | Scope |
 |---|---|---|
@@ -10,6 +10,7 @@ Every customization in this repository, relative to the upstream iPXE baseline (
 | 0002 | `0002-makefile-ipxe-debug.patch` | Debug build fix |
 | 0003 | `0003-snponly-local-boot.patch` | snponly local boot support |
 | 0004 | `0004-realtek-8126-adaptation.patch` | RTL8126 (5G) native driver adaptation |
+| 0005 | `0005-device-info-collection.patch` | Device info collection: SMBIOS type 17 memory settings (`mem-total` / `mem-type` / `mem-speed`) + PCI device-table name via `${net0/chip}` |
 
 ## Design Rationale
 
@@ -67,6 +68,16 @@ All patches are generated against the **same pinned upstream baseline**; upgradi
 - **Verification**: full build passes all 10 artifacts (including the `DEBUG=realtek:3` debug target); field testing on physical hardware pending.
 - **Audit**: the dual-source PHY table audit and the lightweight PHY MCU firmware version-check policy are documented in [8126-porting-audit.md](8126-porting-audit.md) (Chinese only).
 - **Licence**: the 8126 adaptation is derived from the Realtek r8126 driver (GPL-2.0-only, Copyright 2025 Realtek Semiconductor Corp.) and the Linux kernel r8169 driver (GPL-2.0-only); it is licensed under GPL-2.0 only and may not be redistributed under UBDL (see the header of `patches/0004`).
+
+### 5. Device information collection (`0005`)
+
+- **Rationale**: firmware-side device info collection (identity / CPU / memory / NIC) for HTTP reporting. Identity (SMBIOS types 1-3) and CPU (CPUID) settings are already provided upstream, leaving two gaps: no named settings for SMBIOS type 17 (memory devices, one structure per slot), and PCI NICs never populate `driver_name`, so `${net0/chip}` was unusable on PCI.
+- **Changes**: `src/include/ipxe/smbios.h`, `src/interface/smbios/smbios_settings.c`, `src/drivers/bus/pci.c`
+  - `struct smbios_memory_device` (type 17 layout verified against three dmidecode versions: Memory Type `0x12`, Speed `0x15`, Extended Size `0x1C`) + `SMBIOS_TYPE_MEMORY_DEVICE 17`
+  - `${mem-total}` (uint32 MB, aggregated over all modules: `0xFFFF` skipped, `0x7FFF` falls back to Extended Size, bit 15 = GB), `${mem-type}` (first module, mapped to strings such as `DDR5`), `${mem-speed}` (first module, MT/s) — custom fetches dispatched by name, reusing the existing SMBIOS settings scope
+  - `pci_probe` now sets `driver_name` from the matching device-table entry, enabling `${net0/chip}` (e.g. `RTL8125`) for all PCI NICs
+- **Usage**: settings reference and report URL templates in [device-info-reporting.md](device-info-reporting.md) / [device-info-reporting.zh-CN.md](device-info-reporting.zh-CN.md).
+- **Verification**: full build passes all 10 artifacts; settings embedded (strings check); behaviour on real hardware pending (URL encoding of spaces / special characters).
 
 ## EMBED Auto-Boot Script
 

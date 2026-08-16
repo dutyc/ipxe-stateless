@@ -2,7 +2,7 @@
 
 [English](customizations.md) | [中文](customizations.zh-CN.md)
 
-本仓库相对上游 iPXE 基线（默认 `e6e51ccb`）的全部定制 = **四个补丁** + **构建级 EMBED 定制**（`embed/auto.ipxe`，经 `EMBED=` 编译进固件，非补丁）：
+本仓库相对上游 iPXE 基线（默认 `e6e51ccb`）的全部定制 = **五个补丁** + **构建级 EMBED 定制**（`embed/auto.ipxe`，经 `EMBED=` 编译进固件，非补丁）：
 
 | # | 补丁 | 内容 |
 |---|---|---|
@@ -10,6 +10,7 @@
 | 0002 | `0002-makefile-ipxe-debug.patch` | debug 构建修复 |
 | 0003 | `0003-snponly-local-boot.patch` | snponly 本地引导支持 |
 | 0004 | `0004-realtek-8126-adaptation.patch` | RTL8126（5G）native 驱动适配 |
+| 0005 | `0005-device-info-collection.patch` | 设备信息采集：SMBIOS type 17 内存设置（`mem-total` / `mem-type` / `mem-speed`）+ PCI 设备表名经 `${net0/chip}` 暴露 |
 
 ## 设计动机
 
@@ -67,6 +68,16 @@ dist/（十个固件产物 + SHA256SUMS）
 - **验证**：完整构建 10 产物全部通过（含 `DEBUG=realtek:3` debug 目标）；待物理机实测。
 - **审计**：双来源 PHY 表对照审计与 PHY MCU 微码轻量方案（版本检查）详见 [8126-porting-audit.md](8126-porting-audit.md)。
 - **许可**：8126 适配部分参考 Realtek r8126 驱动（GPL-2.0-only，Copyright 2025 Realtek Semiconductor Corp.）与 Linux 内核 r8169（GPL-2.0-only），仅按 GPL-2.0 授权，不得以 UBDL 再分发（见 `patches/0004` 头部声明）。
+
+### 5. 设备信息采集（`0005`）
+
+- **背景**：固件侧设备信息采集（身份 / CPU / 内存 / 网卡）供 HTTP 上报。身份（SMBIOS type 1-3）与 CPU（CPUID）设置官方已有，缺口有二：SMBIOS type 17（内存设备，每插槽一条）无具名设置；PCI 网卡从不填充 `driver_name`，导致 `${net0/chip}` 在 PCI 上不可用。
+- **修改**：`src/include/ipxe/smbios.h`、`src/interface/smbios/smbios_settings.c`、`src/drivers/bus/pci.c`
+  - `struct smbios_memory_device`（type 17 布局经 dmidecode 三个版本交叉验证：Memory Type `0x12`、Speed `0x15`、Extended Size `0x1C`）+ `SMBIOS_TYPE_MEMORY_DEVICE 17`
+  - `${mem-total}`（uint32 MB，全插槽聚合：`0xFFFF` 跳过、`0x7FFF` 回退 Extended Size、bit15=GB）、`${mem-type}`（首槽，映射为 `DDR5` 等字符串）、`${mem-speed}`（首槽，MT/s）——按名分派的自定义 fetch，复用现有 SMBIOS 设置 scope
+  - `pci_probe` 现从匹配的设备表项填充 `driver_name`，使 `${net0/chip}`（如 `RTL8125`）对所有 PCI 网卡生效
+- **用法**：设置项清单与上报 URL 模板见 [device-info-reporting.zh-CN.md](device-info-reporting.zh-CN.md)。
+- **验证**：完整构建 10 产物全部通过；设置已编入（字符串验证）；真机行为待实测（空格 / 特殊字符的 URL 编码）。
 
 ## EMBED 自动引导脚本
 

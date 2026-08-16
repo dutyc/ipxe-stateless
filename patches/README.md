@@ -22,12 +22,13 @@ All patches are generated against the **same upstream baseline**; apply order = 
 | `0002-makefile-ipxe-debug.patch` | `src/Makefile` | Added `DRIVERS_ipxe-debug` definition (debug target inherits the full driver set, fixes `obj_ipxe_debug` link failure) |
 | `0003-snponly-local-boot.patch` | `src/drivers/net/efi/snponly.c` | snponly local boot support: when chainload location fails (local UEFI boot), fall back to taking over all SNP/NII/MNP devices; PXE chainload behaviour unchanged |
 | `0004-realtek-8126-adaptation.patch` | `src/drivers/net/realtek.c`, `realtek.h` | RTL8126 5GbE adaptation (ICVerID detection and PHY configuration dispatch, GPHY OCP/CSI interfaces, 3 PHY static configuration tables, ZRXDC/ASPM configuration) |
+| `0005-device-info-collection.patch` | `src/include/ipxe/smbios.h`, `src/interface/smbios/smbios_settings.c`, `src/drivers/bus/pci.c` | Device information collection: SMBIOS type 17 memory settings (`mem-total` aggregated over all modules, `mem-type` / `mem-speed` from first module, custom fetches) + PCI `driver_name` population so `${net0/chip}` reports the device-table name (e.g. `RTL8125`) |
 
 > RTL8168 research was terminated in 2026-08; the patches contain no 8168 filtering or fix code (see `../docs/8168-research-log.md`).
 
 ## Licensing
 
-- The upstream files modified by the patches (`realtek.c`, `snponly.c`, `Makefile`) inherit the iPXE GPL-2.0-or-later / UBDL licence;
+- The upstream files modified by the patches (`realtek.c`, `snponly.c`, `Makefile`, `smbios.h`, `smbios_settings.c`, `pci.c`) inherit the iPXE GPL-2.0-or-later / UBDL licence;
 - the RTL8125 adaptation parts in `0001` (XID version table, EPHY initialisation, power management, etc.) are derived from the Linux kernel r8169 driver (`drivers/net/ethernet/realtek/r8169_main.c`, GPL-2.0-only); those parts are **GPL-2.0 only** and may not be redistributed under UBDL or any later licence;
 - the RTL8126 adaptation parts in `0004` (PHY static configuration tables, GPHY OCP/CSI interfaces, ZRXDC/ASPM configuration, etc.) are derived from the Realtek r8126 driver (`r8126_n.c`, GPL-2.0-only, Copyright 2025 Realtek Semiconductor Corp.) and the Linux kernel r8169 driver (`drivers/net/ethernet/realtek/r8169_main.c`, GPL-2.0-only); those parts are **GPL-2.0 only** and may not be redistributed under UBDL or any later licence;
 - this repository as a whole is licensed under GPL-2.0 (see `../LICENSE`); every patch header carries an SPDX declaration.

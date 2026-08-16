@@ -1,0 +1,263 @@
+diff --git a/src/drivers/bus/pci.c b/src/drivers/bus/pci.c
+index 9e47dd93c..bb68a5bc8 100644
+--- a/src/drivers/bus/pci.c
++++ b/src/drivers/bus/pci.c
+@@ -432,6 +432,11 @@ int pci_find_driver ( struct pci_device *pci ) {
+ int pci_probe ( struct pci_device *pci ) {
+ 	int rc;
+ 
++	/* Expose the matching device-table name (e.g. "RTL8125") via
++	 * the generic device driver_name, used by netdev settings such
++	 * as ${net0/chip}.
++	 */
++	pci->dev.driver_name = pci->id->name;
+ 	DBGC ( pci, PCI_FMT " (%04x:%04x) has driver \"%s\"\n",
+ 	       PCI_ARGS ( pci ), pci->vendor, pci->device, pci->id->name );
+ 	DBGC ( pci, PCI_FMT " has mem %lx io %lx irq %d\n",
+diff --git a/src/include/ipxe/smbios.h b/src/include/ipxe/smbios.h
+index 5e431504a..46db300a1 100644
+--- a/src/include/ipxe/smbios.h
++++ b/src/include/ipxe/smbios.h
+@@ -183,6 +183,51 @@ struct smbios_enclosure_information {
+ /** SMBIOS enclosure information structure type */
+ #define SMBIOS_TYPE_ENCLOSURE_INFORMATION 3
+ 
++/** SMBIOS memory device structure */
++struct smbios_memory_device {
++	/** SMBIOS structure header */
++	struct smbios_header header;
++	/** Physical memory array handle */
++	uint16_t array_handle;
++	/** Memory error information handle */
++	uint16_t error_handle;
++	/** Total width (bits) */
++	uint16_t total_width;
++	/** Data width (bits) */
++	uint16_t data_width;
++	/** Size (bit 15: 0=MB, 1=GB; 0x7FFF: use extended_size) */
++	uint16_t size;
++	/** Form factor */
++	uint8_t form_factor;
++	/** Device set */
++	uint8_t device_set;
++	/** Device locator string */
++	uint8_t locator;
++	/** Bank locator string */
++	uint8_t bank_locator;
++	/** Memory type */
++	uint8_t memory_type;
++	/** Type detail */
++	uint16_t type_detail;
++	/** Speed (MT/s) */
++	uint16_t speed;
++	/** Manufacturer string */
++	uint8_t manufacturer;
++	/** Serial number string */
++	uint8_t serial;
++	/** Asset tag string */
++	uint8_t asset_tag;
++	/** Part number string */
++	uint8_t part_number;
++	/** Rank */
++	uint8_t rank;
++	/** Extended size (MB, SMBIOS 2.7+) */
++	uint32_t extended_size;
++} __attribute__ (( packed ));
++
++/** SMBIOS memory device structure type */
++#define SMBIOS_TYPE_MEMORY_DEVICE 17
++
+ /** SMBIOS OEM strings structure type */
+ #define SMBIOS_TYPE_OEM_STRINGS 11
+ 
+diff --git a/src/interface/smbios/smbios_settings.c b/src/interface/smbios/smbios_settings.c
+index d0ef49d5f..7051b0059 100644
+--- a/src/interface/smbios/smbios_settings.c
++++ b/src/interface/smbios/smbios_settings.c
+@@ -27,6 +27,7 @@ FILE_SECBOOT ( PERMITTED );
+ #include <stdint.h>
+ #include <string.h>
+ #include <errno.h>
++#include <byteswap.h>
+ #include <ipxe/settings.h>
+ #include <ipxe/init.h>
+ #include <ipxe/uuid.h>
+@@ -60,6 +61,132 @@ static const struct settings_scope smbios_settings_scope;
+ 	( ( (_type) << 16 ) |					\
+ 	  ( offsetof ( _structure, _field ) << 8 ) )
+ 
++/** Memory device settings (defined below) */
++extern const struct setting mem_total_setting;
++extern const struct setting mem_type_setting;
++extern const struct setting mem_speed_setting;
++
++/** Memory type names (SMBIOS spec table 7.18.3) */
++static const char * const memory_type_names[] = {
++	[0x0F] = "SDRAM",
++	[0x11] = "RDRAM",
++	[0x12] = "DDR",
++	[0x13] = "DDR2",
++	[0x14] = "DDR2 FB-DIMM",
++	[0x18] = "DDR3",
++	[0x19] = "FBD2",
++	[0x1A] = "DDR4",
++	[0x1B] = "LPDDR",
++	[0x1C] = "LPDDR2",
++	[0x1D] = "LPDDR3",
++	[0x1E] = "LPDDR4",
++	[0x20] = "HBM",
++	[0x21] = "HBM2",
++	[0x22] = "DDR5",
++	[0x23] = "LPDDR5",
++	[0x24] = "HBM3",
++	[0x25] = "LPDDR5X",
++};
++
++/**
++ * Fetch total installed memory size
++ *
++ * @v data		Buffer to fill with setting data
++ * @v len		Length of buffer
++ * @ret len		Length of setting data, or negative error
++ *
++ * Aggregates the Size / Extended Size fields of every Memory Device
++ * (type 17) structure, in MB.
++ */
++static int smbios_fetch_mem_total ( void *data, size_t len ) {
++	const struct smbios_memory_device *memdev;
++	uint64_t total_mb = 0;
++	unsigned int instance;
++	uint32_t size;
++
++	/* Sum the size of each memory module */
++	for ( instance = 0 ; ; instance++ ) {
++		memdev = ( const struct smbios_memory_device * )
++			smbios_structure ( SMBIOS_TYPE_MEMORY_DEVICE, instance );
++		if ( ! memdev )
++			break;
++		if ( memdev->header.len < 0x0E )
++			continue;
++		size = memdev->size;
++		if ( size == 0xFFFF ) {
++			/* Unknown */
++			continue;
++		} else if ( size == 0x7FFF ) {
++			/* Extended size (SMBIOS 2.7+) */
++			if ( memdev->header.len < 0x20 )
++				continue;
++			total_mb += memdev->extended_size;
++		} else if ( size & 0x8000 ) {
++			/* Size in GB */
++			total_mb += ( ( uint64_t ) ( size & 0x7FFF ) * 1024 );
++		} else {
++			/* Size in MB */
++			total_mb += size;
++		}
++	}
++
++	if ( ! total_mb )
++		return -ENOENT;
++	if ( len > sizeof ( uint32_t ) )
++		len = sizeof ( uint32_t );
++	*( ( uint32_t * ) data ) = cpu_to_be32 ( total_mb );
++	return sizeof ( uint32_t );
++}
++
++/**
++ * Fetch memory type of first module
++ *
++ * @v data		Buffer to fill with setting data
++ * @v len		Length of buffer
++ * @ret len		Length of setting data, or negative error
++ */
++static int smbios_fetch_mem_type ( void *data, size_t len ) {
++	const struct smbios_memory_device *memdev;
++	const char *type;
++
++	memdev = ( const struct smbios_memory_device * )
++		smbios_structure ( SMBIOS_TYPE_MEMORY_DEVICE, 0 );
++	if ( ! memdev || memdev->header.len < 0x13 )
++		return -ENOENT;
++	if ( memdev->memory_type < ( sizeof ( memory_type_names ) /
++				      sizeof ( memory_type_names[0] ) ) ) {
++		type = memory_type_names[memdev->memory_type];
++	} else {
++		type = NULL;
++	}
++	if ( ! type )
++		type = "Unknown";
++	if ( len > strlen ( type ) )
++		len = strlen ( type );
++	memcpy ( data, type, len );
++	return strlen ( type );
++}
++
++/**
++ * Fetch memory speed of first module
++ *
++ * @v data		Buffer to fill with setting data
++ * @v len		Length of buffer
++ * @ret len		Length of setting data, or negative error
++ */
++static int smbios_fetch_mem_speed ( void *data, size_t len ) {
++	const struct smbios_memory_device *memdev;
++
++	memdev = ( const struct smbios_memory_device * )
++		smbios_structure ( SMBIOS_TYPE_MEMORY_DEVICE, 0 );
++	if ( ! memdev || memdev->header.len < 0x17 )
++		return -ENOENT;
++	if ( len > sizeof ( uint16_t ) )
++		len = sizeof ( uint16_t );
++	*( ( uint16_t * ) data ) = cpu_to_be16 ( memdev->speed );
++	return sizeof ( uint16_t );
++}
++
+ /**
+  * Check applicability of SMBIOS setting
+  *
+@@ -86,6 +213,14 @@ static int smbios_fetch ( struct settings *settings, struct setting *setting,
+ 			  void *data, size_t len ) {
+ 	const struct smbios_header *structure;
+ 	unsigned int tag_instance;
++
++	/* Handle memory device settings (no tag, custom fetch) */
++	if ( setting_cmp ( setting, &mem_total_setting ) == 0 )
++		return smbios_fetch_mem_total ( data, len );
++	if ( setting_cmp ( setting, &mem_type_setting ) == 0 )
++		return smbios_fetch_mem_type ( data, len );
++	if ( setting_cmp ( setting, &mem_speed_setting ) == 0 )
++		return smbios_fetch_mem_speed ( data, len );
+ 	unsigned int tag_type;
+ 	unsigned int tag_offset;
+ 	unsigned int tag_len;
+@@ -271,3 +406,30 @@ const struct setting board_serial_setting __setting ( SETTING_HOST_EXTRA,
+ 	.type = &setting_type_string,
+ 	.scope = &smbios_settings_scope,
+ };
++
++/** Total installed memory setting (aggregated over all modules, in MB) */
++const struct setting mem_total_setting __setting ( SETTING_HOST_EXTRA,
++						   mem-total ) = {
++	.name = "mem-total",
++	.description = "Total installed memory (MB)",
++	.type = &setting_type_uint32,
++	.scope = &smbios_settings_scope,
++};
++
++/** Memory type setting (first module) */
++const struct setting mem_type_setting __setting ( SETTING_HOST_EXTRA,
++						  mem-type ) = {
++	.name = "mem-type",
++	.description = "Memory type (first module)",
++	.type = &setting_type_string,
++	.scope = &smbios_settings_scope,
++};
++
++/** Memory speed setting (first module, in MT/s) */
++const struct setting mem_speed_setting __setting ( SETTING_HOST_EXTRA,
++						   mem-speed ) = {
++	.name = "mem-speed",
++	.description = "Memory speed in MT/s (first module)",
++	.type = &setting_type_uint16,
++	.scope = &smbios_settings_scope,
++};

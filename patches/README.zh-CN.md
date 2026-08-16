@@ -22,12 +22,13 @@
 | `0002-makefile-ipxe-debug.patch` | `src/Makefile` | 新增 `DRIVERS_ipxe-debug` 定义（debug 目标继承全驱动集，修复 `obj_ipxe_debug` 链接失败） |
 | `0003-snponly-local-boot.patch` | `src/drivers/net/efi/snponly.c` | snponly 本地引导支持：链加载定位失败时（本地 UEFI 引导）回退接管全部 SNP/NII/MNP 设备，PXE 链加载场景行为不变 |
 | `0004-realtek-8126-adaptation.patch` | `src/drivers/net/realtek.c`、`realtek.h` | RTL8126 5GbE 适配（ICVerID 检测与 PHY 配置方法分派、GPHY OCP/CSI 接口、PHY 静态配置表 ×3、ZRXDC/ASPM 配置） |
+| `0005-device-info-collection.patch` | `src/include/ipxe/smbios.h`、`src/interface/smbios/smbios_settings.c`、`src/drivers/bus/pci.c` | 设备信息采集：SMBIOS type 17 内存设置（`mem-total` 全插槽聚合、`mem-type` / `mem-speed` 取首槽，自定义 fetch）+ PCI `driver_name` 填充，使 `${net0/chip}` 输出设备表名（如 `RTL8125`） |
 
 > RTL8168 相关研究已于 2026-08 终止，补丁不含 8168 过滤或修复代码（见 `../docs/8168-research-log.md`）。
 
 ## 授权说明
 
-- 补丁修改的上游文件（`realtek.c`、`snponly.c`、`Makefile`）继承 iPXE 的 GPL-2.0-or-later / UBDL 许可；
+- 补丁修改的上游文件（`realtek.c`、`snponly.c`、`Makefile`、`smbios.h`、`smbios_settings.c`、`pci.c`）继承 iPXE 的 GPL-2.0-or-later / UBDL 许可；
 - `0001` 中 RTL8125 适配部分（XID 版本表、EPHY 初始化、电源管理等）参考 Linux 内核 r8169 驱动（`drivers/net/ethernet/realtek/r8169_main.c`，GPL-2.0-only），该部分**仅按 GPL-2.0 授权**，不得以 UBDL 或更高版本许可再分发；
 - `0004` 中 RTL8126 适配部分（PHY 静态配置表、GPHY OCP/CSI 接口、ZRXDC/ASPM 配置等）参考 Realtek r8126 驱动（`r8126_n.c`，GPL-2.0-only，Copyright 2025 Realtek Semiconductor Corp.）与 Linux 内核 r8169 驱动（`drivers/net/ethernet/realtek/r8169_main.c`，GPL-2.0-only），该部分**仅按 GPL-2.0 授权**，不得以 UBDL 或更高版本许可再分发；
 - 本仓库整体遵循 GPL-2.0（见 `../LICENSE`），补丁头部均含 SPDX 声明。
