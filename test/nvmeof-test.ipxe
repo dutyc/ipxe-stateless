@@ -1,0 +1,16 @@
+#!ipxe
+# NVMe/TCP validation script (embedded into test firmware)
+# slirp network: guest 10.0.2.15, host loopback reachable at 10.0.2.2
+
+dhcp || echo DHCP-FAIL
+
+echo === HTTP-TCP-TEST begin ===
+chain http://10.0.2.2:8000/hello.txt && echo HTTP-8000-OK || echo HTTP-8000-FAIL
+chain http://10.0.2.2:8001/hello.txt && echo HTTP-8001-OK || echo HTTP-8001-FAIL
+echo === HTTP-TCP-TEST end ===
+
+echo === NVME-TCP-TEST: sanboot begin ===
+sanboot nvme://10.0.2.2:4420/nqn.2026-08.org.ipxe-stateless:test
+echo === NVME-TCP-TEST: sanboot rc = ${?} ===
+echo === NVME-TCP-TEST: sanboot failed, no GRUB handover ===
+shell
