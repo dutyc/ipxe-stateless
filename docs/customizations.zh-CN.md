@@ -79,6 +79,27 @@ dist/（十个固件产物 + SHA256SUMS）
 - **用法**：设置项清单与上报 URL 模板见 [device-info-reporting.zh-CN.md](device-info-reporting.zh-CN.md)。
 - **验证**：完整构建 10 产物全部通过；设置已编入（字符串验证）；真机行为待实测（空格 / 特殊字符的 URL 编码）。
 
+### 6. NVMe-oF（NVMe over TCP）SAN 支持（`0006`）
+
+- **背景**：上游 iPXE 无 NVMe-oF 传输支持；从 NVMe/TCP target（如 Linux `nvmet`）SAN 引导需要完整协议驱动 + `SANBOOT_PROTO_NVME_TCP` 配置项。
+- **修改**：`src/config/config.c`、`src/config/general.h`（`SANBOOT_PROTO_NVME_TCP`）、`src/include/ipxe/errfile.h`、`src/include/ipxe/nvmetcp.h`、`src/net/tcp/nvmetcp.c`、`src/net/tcp/nvmetcp_auth.c`、`src/tests/nvmetcp_test.c`、`src/tests/tests.c`
+  - 8 阶段状态机：ICReq/ICResp 参数协商 → Connect（Admin）→ Property Set（CC.EN=1）→ Identify（控制器/命名空间）→ Connect（I/O）→ 块读写（R2T 流控）
+  - DH-HMAC-CHAP 认证（AuthSend/AuthReceive，DH 群 0/2048/3072/4096）
+  - EFI 设备路径描述与 BlockIo 钩接（供 `sanboot`）；单元测试（结构布局 + Identify NS 解析）
+- **用法**：端到端指南（nvmet 服务端配置含认证、`sanboot` 语法、QEMU 验证）见 [nvmeof-usage.md](nvmeof-usage.md)。
+- **验证**：QEMU/OVMF + Ubuntu 26.04 内核 7.0 nvmet target，GRUB 2.14 SAN 引导链路通过（见 [nvmeof-auth-debug-log.md](nvmeof-auth-debug-log.md)）。
+- **授权**：ipxe-stateless 自研实现，`FILE_LICENCE ( GPL2_ONLY )`——仅按 GPL-2.0 授权，不得以 UBDL 再分发。
+
+### 7. NVMe/TCP 认证与状态机修复（`0007`）
+
+- **背景**：针对 nvmet 端到端验证 0006 认证路径时发现三个 bug：瞬态 `-EAGAIN` 误杀会话（应等待 TCP 窗口）、AuthReceive 可能被重复发送、认证完成竞态（phase 在最终 AuthReceive 完成前切换，导致 Property Set 被跳过、Identify 被拒）。
+- **修改**：`src/include/ipxe/nvmetcp.h`、`src/net/tcp/nvmetcp.c`、`src/net/tcp/nvmetcp_auth.c`、`src/tests/nvmetcp_test.c`
+  - 瞬态 `-EAGAIN` 处理（挂起进程、窗口恢复后继续）与 AuthReceive 发送幂等、step 统一推进
+  - 认证阶段完成以 `completed`/`rx_complete` 双标志 + 命令 id 匹配（`rx_cid`）门控，确保 Property Set 不被跳过（修复 Identify 被 `0x8018` 拒绝）；Connect 响应无 ATR 位时的 `NVME_SC_AUTH_REQUIRED` 状态码触发路径
+  - Identify NS 的 LBAF 偏移修正（64→128）
+- **排障日志**：完整调查时间线与 wire 层证据见 [nvmeof-auth-debug-log.md](nvmeof-auth-debug-log.md)。
+- **验证**：全链路复跑：`sending Property Set (CC)` 出现、wire 层全部命令 `status=0x0000`、`0x8018` 出现 0 次、GRUB 2.14 SAN 引导成功。
+
 ## EMBED 自动引导脚本
 
 `embed/auto.ipxe` 属于**配置资产**（非源码补丁）：改动无需重新生成补丁，直接修改文件后重新构建即可（见 [patches/README.zh-CN.md](../patches/README.zh-CN.md)）。

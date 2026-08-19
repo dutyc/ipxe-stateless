@@ -79,6 +79,27 @@ All patches are generated against the **same pinned upstream baseline**; upgradi
 - **Usage**: settings reference and report URL templates in [device-info-reporting.md](device-info-reporting.md) / [device-info-reporting.zh-CN.md](device-info-reporting.zh-CN.md).
 - **Verification**: full build passes all 10 artifacts; settings embedded (strings check); behaviour on real hardware pending (URL encoding of spaces / special characters).
 
+### 6. NVMe-oF (NVMe over TCP) SAN support (`0006`)
+
+- **Rationale**: upstream iPXE has no NVMe-oF transport support; SAN boot from NVMe/TCP targets (e.g. Linux `nvmet`) requires a full protocol driver plus a `SANBOOT_PROTO_NVME_TCP` config option.
+- **Changes**: `src/config/config.c`, `src/config/general.h` (`SANBOOT_PROTO_NVME_TCP`), `src/include/ipxe/errfile.h`, `src/include/ipxe/nvmetcp.h`, `src/net/tcp/nvmetcp.c`, `src/net/tcp/nvmetcp_auth.c`, `src/tests/nvmetcp_test.c`, `src/tests/tests.c`
+  - 8-phase state machine: ICReq/ICResp parameter negotiation → Connect (Admin) → Property Set (CC.EN=1) → Identify (controller/namespace) → Connect (I/O) → block read/write with R2T flow control
+  - DH-HMAC-CHAP authentication (AuthSend/AuthReceive, DH groups 0/2048/3072/4096)
+  - EFI device-path description and BlockIo hooking for `sanboot`; unit tests (structure layout + Identify NS parsing)
+- **Usage**: end-to-end guide (nvmet target setup incl. auth, `sanboot` syntax, QEMU validation) in [nvmeof-usage.md](nvmeof-usage.md) (Chinese only).
+- **Verification**: QEMU/OVMF + Ubuntu 26.04 kernel 7.0 nvmet target, GRUB 2.14 SAN boot chain passing (see [nvmeof-auth-debug-log.md](nvmeof-auth-debug-log.md), Chinese only).
+- **Licence**: original ipxe-stateless implementation, `FILE_LICENCE ( GPL2_ONLY )` — GPL-2.0 only, not redistributable under UBDL.
+
+### 7. NVMe/TCP authentication and state-machine fixes (`0007`)
+
+- **Rationale**: three bugs found while validating the 0006 auth path end-to-end against nvmet: transient `-EAGAIN` killed the session instead of waiting for the TCP window, AuthReceive could be sent twice, and the auth-complete race (phase switched before the final AuthReceive completion, so the Property Set was skipped and Identify was rejected).
+- **Changes**: `src/include/ipxe/nvmetcp.h`, `src/net/tcp/nvmetcp.c`, `src/net/tcp/nvmetcp_auth.c`, `src/tests/nvmetcp_test.c`
+  - Transient `-EAGAIN` handling (defer the process, resume on window) and idempotent AuthReceive send with unified step advancement
+  - Auth phase completion gated by `completed`/`rx_complete` flags plus command-id matching (`rx_cid`), so the Property Set is never skipped (fixes Identify rejected with `0x8018`); `NVME_SC_AUTH_REQUIRED` status-only trigger for Connect (no ATR bit)
+  - Identify NS LBAF offset fix (64→128)
+- **Debug log**: full investigation timeline with wire-level evidence in [nvmeof-auth-debug-log.md](nvmeof-auth-debug-log.md) (Chinese only).
+- **Verification**: re-run of the full chain: `sending Property Set (CC)` present, all commands `status=0x0000` on the wire, `0x8018` zero occurrences, GRUB 2.14 SAN boot OK.
+
 ## EMBED Auto-Boot Script
 
 `embed/auto.ipxe` is a configuration asset (not a source patch): changes do not require regenerating patches — modify the file and rebuild. See [patches/README.md](../patches/README.md) for details.
