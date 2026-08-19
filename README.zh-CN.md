@@ -5,17 +5,19 @@
 [![Version](https://img.shields.io/github/v/tag/dutyc/ipxe-stateless)](https://github.com/dutyc/ipxe-stateless/releases)
 [![Platform](https://img.shields.io/badge/Platform-x86_64%20UEFI%2FBIOS-0f766e)](docs/network-support.zh-CN.md)
 [![Upstream](https://img.shields.io/badge/Upstream-iPXE%20e6e51ccb-111111)](patches/README.zh-CN.md)
-[![Patches](https://img.shields.io/badge/Patches-5-7c3aed)](docs/customizations.zh-CN.md)
+[![Patches](https://img.shields.io/badge/Patches-7-7c3aed)](docs/customizations.zh-CN.md)
 
 [English](README.md) | [中文](README.zh-CN.md)
 
 **iPXE-Stateless** 是面向无状态（Stateless）云原生计算环境的**网络引导固件构建仓库**：不包含 iPXE 源码，仅维护差异补丁与构建资产，可在任意上游基线之上重建。作为 iPXE-All-Ready 平台的固件底座——主仓库让算力无状态，本仓库让引导固件无状态。
 
+> **分支：`research/nvme-of`** — NVMe-oF（NVMe over TCP）SAN 引导实验分支：nvmetcp 驱动、DH-HMAC-CHAP 认证、NBFT 消费种子模块与测试工具。探索性开发与 `main` 主干隔离，稳定后可能合入 `main`。
+
 ----
 
 ## 定制内容
 
-对上游 iPXE 的全部修改以 `git apply` 可应用的补丁维护在固定基线（`e6e51ccb`）上，当前共五个：RTL8125（2.5G）与 RTL8126（5G）原生驱动、SNP 本地引导兜底、realtek 调试构建、设备信息采集（SMBIOS 内存 + 网卡芯片名）。设计动机与实现详见 **[docs/customizations.zh-CN.md](./docs/customizations.zh-CN.md)**；网卡支持矩阵与实测记录见 [docs/network-support.zh-CN.md](./docs/network-support.zh-CN.md)。
+对上游 iPXE 的全部修改以 `git apply` 可应用的补丁维护在固定基线（`e6e51ccb`）上，当前共七个：RTL8125（2.5G）与 RTL8126（5G）原生驱动、SNP 本地引导兜底、realtek 调试构建、设备信息采集（SMBIOS 内存 + 网卡芯片名）、NVMe-oF（NVMe over TCP）SAN 支持（含 DH-HMAC-CHAP 认证）与认证/状态机修复。设计动机与实现详见 **[docs/customizations.zh-CN.md](./docs/customizations.zh-CN.md)**；网卡支持矩阵与实测记录见 [docs/network-support.zh-CN.md](./docs/network-support.zh-CN.md)。
 
 ## 快速开始
 
@@ -31,6 +33,9 @@
 - [网卡支持矩阵](./docs/network-support.zh-CN.md) — 覆盖情况与实测记录
 - [设备信息上报](./docs/device-info-reporting.zh-CN.md) — 采集变量清单与用法
 - [构建产物](./docs/build-artifacts.zh-CN.md) — 产物列表、校验与选用
+- [NVMe-OF 使用指南](./docs/nvmeof-usage.md) — NVMe over TCP SAN 引导用法：nvmet 服务端配置（含 DH-HMAC-CHAP 认证）、`sanboot` 用法、QEMU 验证方法
+- [能力实现参考（iPXE-All-Ready 集成用）](./docs/capability-reference.md) — 固件能力实现与接口契约，认证凭证注入链路详解
+- [NVMe-OF 测试流程](./docs/nvmeof-test-procedure.md) — 端到端测试流程：`test/` 交付脚本、GRUB 引导盘、QEMU 轮次、pcap 分析
 - [补丁集说明](./patches/README.zh-CN.md) — 授权边界与上游升级流程
 - [RTL8126 移植审计](./docs/8126-porting-audit.md) — 双来源移植审计记录（中文）
 

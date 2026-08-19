@@ -5,17 +5,19 @@
 [![Version](https://img.shields.io/github/v/tag/dutyc/ipxe-stateless)](https://github.com/dutyc/ipxe-stateless/releases)
 [![Platform](https://img.shields.io/badge/Platform-x86_64%20UEFI%2FBIOS-0f766e)](docs/network-support.md)
 [![Upstream](https://img.shields.io/badge/Upstream-iPXE%20e6e51ccb-111111)](patches/README.md)
-[![Patches](https://img.shields.io/badge/Patches-5-7c3aed)](docs/customizations.md)
+[![Patches](https://img.shields.io/badge/Patches-7-7c3aed)](docs/customizations.md)
 
 [English](README.md) | [中文](README.zh-CN.md)
 
 **iPXE-Stateless** is a **network boot firmware build repository** for stateless cloud-native computing environments: it contains no iPXE source code — only difference patches and build assets — rebuildable on any upstream baseline. It is the firmware foundation of the iPXE-All-Ready platform — the platform makes compute stateless; this repository makes the boot firmware stateless.
 
+> **Branch: `research/nvme-of`** — experimental NVMe-oF (NVMe over TCP) SAN boot development branch: nvmetcp driver, DH-HMAC-CHAP authentication, NBFT consumer seed module, test tooling. Exploratory work is kept isolated from `main`; it may be merged into `main` once stabilized.
+
 ----
 
 ## Customizations
 
-All modifications to upstream iPXE are maintained as `git apply`-able patches against the pinned baseline (`e6e51ccb`), currently five: native drivers for the RTL8125 (2.5G) and RTL8126 (5G) series, SNP local-boot fallback, realtek debug builds, and device information collection (SMBIOS memory + NIC chip name). Design rationale and implementation: **[docs/customizations.md](./docs/customizations.md)**. NIC support matrix and field-test records: [docs/network-support.md](./docs/network-support.md).
+All modifications to upstream iPXE are maintained as `git apply`-able patches against the pinned baseline (`e6e51ccb`), currently seven: native drivers for the RTL8125 (2.5G) and RTL8126 (5G) series, SNP local-boot fallback, realtek debug builds, device information collection (SMBIOS memory + NIC chip name), NVMe-oF (NVMe over TCP) SAN support with DH-HMAC-CHAP authentication, and the authentication/state-machine fixes. Design rationale and implementation: **[docs/customizations.md](./docs/customizations.md)**. NIC support matrix and field-test records: [docs/network-support.md](./docs/network-support.md).
 
 ## Quick Start
 
@@ -31,6 +33,9 @@ Requirements: Linux with `git` / `make` / `gcc`. Artifacts are written to `dist/
 - [NIC support matrix](./docs/network-support.md) — coverage and field-test records
 - [Device information reporting](./docs/device-info-reporting.md) — collected settings and report URL usage
 - [Build artifacts](./docs/build-artifacts.md) — artifact list, checksums, selection guide
+- [NVMe-oF usage](./docs/nvmeof-usage.md) — NVMe over TCP SAN boot guide: nvmet target setup (incl. DH-HMAC-CHAP auth), `sanboot` usage, QEMU validation (Chinese only)
+- [Capability reference for iPXE-All-Ready](./docs/capability-reference.md) — firmware capabilities and interface contracts, credential injection flow in detail (Chinese only)
+- [NVMe-oF test procedure](./docs/nvmeof-test-procedure.md) — end-to-end test flow: `test/` scripts, GRUB boot disk, QEMU rounds, pcap analysis (Chinese only)
 - [Patch set](./patches/README.md) — licensing and upstream baseline upgrade workflow
 - [RTL8126 porting audit](./docs/8126-porting-audit.md) — dual-source porting audit records (Chinese only)
 
