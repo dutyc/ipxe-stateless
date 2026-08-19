@@ -1,0 +1,54 @@
+#!/bin/sh
+# initramfs-tools hook for the NBFT (NVMe Boot Firmware Table) consumer.
+# Seed implementation; mirrors open-iscsi's hooks/iscsi packaging so it
+# can be adopted by nvme-cli packaging (see initramfs-nbft/README).
+
+PREREQ="udev"
+
+prereqs()
+{
+	echo "$PREREQ"
+}
+
+case $1 in
+# get pre-requisites
+prereqs)
+	prereqs
+	exit 0
+	;;
+esac
+
+if [ -r /etc/initramfs-tools/conf.d/nvme-cli ] ; then
+	. /etc/initramfs-tools/conf.d/nvme-cli
+fi
+
+if [ x"$NO_NBFT_IN_INITRAMFS" = x"yes" ] ; then
+	exit 0
+fi
+
+# Hooks for loading nbft bits into the initramfs
+. /usr/share/initramfs-tools/hook-functions
+
+# NBFT consumer core (framework-independent seed)
+if [ -x /usr/local/sbin/nbft-connect ] ; then
+	copy_exec /usr/local/sbin/nbft-connect /usr/local/sbin
+else
+	echo "nbft hook: nbft-connect not found, skipping" >&2
+	exit 0
+fi
+
+# nvme-cli provides `nbft show` (parse) and `connect-all --nbft` (connect)
+NVME_BIN="$(command -v nvme 2>/dev/null || echo /usr/sbin/nvme)"
+if [ -x "$NVME_BIN" ] ; then
+	copy_exec "$NVME_BIN" "${NVME_BIN%/*}"
+fi
+
+# jq is required to parse `nvme nbft show -o json`
+JQ_BIN="$(command -v jq 2>/dev/null || echo /usr/bin/jq)"
+if [ -x "$JQ_BIN" ] ; then
+	copy_exec "$JQ_BIN" "${JQ_BIN%/*}"
+fi
+
+for x in nvme_fabrics nvme_tcp; do
+	manual_add_modules ${x}
+done

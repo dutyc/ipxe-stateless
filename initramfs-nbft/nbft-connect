@@ -1,0 +1,295 @@
+#!/bin/sh
+# nbft-connect - NBFT (NVMe Boot Firmware Table) consumer core.
+#
+# Framework-independent: detects the ACPI NBFT table, parses it via
+# `nvme nbft show` (nvme-cli, libnvme), and prints per-HFI records that
+# initramfs adapter scripts turn into network configuration.  With
+# --connect it performs the NVMe-oF connection (nvme connect-all --nbft).
+#
+# Design mirrors:
+#   - SUSE dracut 95nvmf parse-nvmf-boot-connections.sh (NBFT -> ip=)
+#   - open-iscsi local-top/iscsi (iBFT auto network configuration)
+#
+# Intended as a seed implementation to be adopted upstream, e.g. packaged
+# with nvme-cli like open-iscsi ships its initramfs integration.
+
+set -u
+
+NBFT_SYSFS_PATH="${NBFT_SYSFS_PATH:-/sys/firmware/acpi/tables}"
+JQ="$(command -v jq || echo /usr/bin/jq)"
+NVME="$(command -v nvme || echo /usr/sbin/nvme)"
+
+# --- helpers ----------------------------------------------------------------
+log() {
+    [ "${VERBOSE:-0}" -eq 1 ] || return 0
+    echo "nbft-connect: $*" >&2
+}
+
+warn() {
+    echo "nbft-connect: WARNING: $*" >&2
+}
+
+# Detect the NBFT ACPI tables exported by the kernel.
+# Multiple tables (NBFT, NBFT1, ...) are supported like the SUSE module.
+detect_nbft() {
+    local f found=0
+    for f in "${NBFT_SYSFS_PATH}"/NBFT*; do
+        [ -e "$f" ] || continue
+        found=1
+        log "found NBFT table at $f"
+    done
+    [ "$found" -eq 1 ]
+}
+
+# Normalize a MAC address to lowercase colon-separated form.
+normalize_mac() {
+    echo "$1" | tr 'A-F' 'a-f' | tr -- '- ' '::'
+}
+
+# Resolve the kernel interface name for a MAC address, if present.
+ifname_by_mac() {
+    local want="$1" dev addr
+    for dev in /sys/class/net/*; do
+        [ -e "${dev}/address" ] || continue
+        addr="$(cat "${dev}/address")"
+        [ "$(normalize_mac "$addr")" = "$want" ] || continue
+        echo "${dev##*/}"
+        return 0
+    done
+    return 1
+}
+
+# Convert a CIDR prefix to a dotted-quad netmask (IPv4 only).
+prefix_to_netmask() {
+    local prefix="$1" mask="" i
+    [ "$prefix" -ge 0 ] 2>/dev/null || return 1
+    [ "$prefix" -le 32 ] 2>/dev/null || return 1
+    for i in 1 2 3 4; do
+        if [ "$prefix" -ge 8 ]; then
+            mask="${mask}255"
+            prefix=$((prefix - 8))
+        else
+            case "$prefix" in
+            0) mask="${mask}0" ;;
+            1) mask="${mask}128" ;;
+            2) mask="${mask}192" ;;
+            3) mask="${mask}224" ;;
+            4) mask="${mask}240" ;;
+            5) mask="${mask}248" ;;
+            6) mask="${mask}252" ;;
+            7) mask="${mask}254" ;;
+            esac
+            prefix=0
+        fi
+        [ "$i" -lt 4 ] && mask="${mask}."
+    done
+    echo "$mask"
+}
+
+# Version gate: does this nvme-cli support `connect-all --nbft`?
+# (Same technique as SUSE 95nvmf nvmf-autoconnect.sh.)
+connect_all_nbft_supported() {
+    "${NVME}" connect-all --help 2>&1 |
+        sed -n '/[[:space:]]--nbft[[:space:]]/q1;$q0' \
+            && return 1
+    return 0
+}
+
+# Self-test of the pure helper functions (no NBFT table required).
+selftest() {
+    local fail=0
+    local got
+
+    got="$(prefix_to_netmask 24)"
+    [ "$got" = "255.255.255.0" ] || { echo "FAIL prefix 24: $got" >&2; fail=1; }
+    got="$(prefix_to_netmask 8)"
+    [ "$got" = "255.0.0.0" ] || { echo "FAIL prefix 8: $got" >&2; fail=1; }
+    got="$(prefix_to_netmask 32)"
+    [ "$got" = "255.255.255.255" ] || { echo "FAIL prefix 32: $got" >&2; fail=1; }
+    got="$(prefix_to_netmask 0)"
+    [ "$got" = "0.0.0.0" ] || { echo "FAIL prefix 0: $got" >&2; fail=1; }
+    got="$(prefix_to_netmask 17)"
+    [ "$got" = "255.255.128.0" ] || { echo "FAIL prefix 17: $got" >&2; fail=1; }
+
+    got="$(normalize_mac '52:54:00:4F:97:E9')"
+    [ "$got" = "52:54:00:4f:97:e9" ] || { echo "FAIL mac case: $got" >&2; fail=1; }
+    got="$(normalize_mac '52-54-00-4F-97-E9')"
+    [ "$got" = "52:54:00:4f:97:e9" ] || { echo "FAIL mac dash: $got" >&2; fail=1; }
+
+    if [ "$fail" -eq 0 ]; then
+        echo "nbft-connect selftest: OK"
+        return 0
+    fi
+    echo "nbft-connect selftest: FAILED" >&2
+    return 1
+}
+
+# --- core actions -----------------------------------------------------------
+
+# Parse the NBFT tables and print eval-able records:
+#   NBFT_ENTRY_COUNT=N
+#   NBFT_IFACE_N=<kernel ifname by MAC, empty if unknown>
+#   NBFT_MAC_N=...
+#   NBFT_PROTO_N=dhcp|dhcp6|static
+#   NBFT_VLAN_N=<VID or empty>
+#   NBFT_IP_N=...
+#   NBFT_PREFIX_N=...
+#   NBFT_NETMASK_N=...
+#   NBFT_GATEWAY_N=...
+#   NBFT_DNS0_N=...
+#   NBFT_DNS1_N=...
+print_entries() {
+    local json
+    json="$("${NVME}" nbft show -H -o json)" || {
+        warn "nvme nbft show failed (rc=$?)"
+        return 1
+    }
+
+    # One record per HFI (host fabric interface) across all tables.
+    local count
+    count="$(echo "$json" | "${JQ}" '[ .[] | .hfi[] ] | length')" || {
+        warn "jq: cannot parse nvme nbft show output"
+        return 1
+    }
+    [ "$count" -gt 0 ] 2>/dev/null || {
+        log "NBFT table present but no HFI entries"
+        return 0
+    }
+
+    echo "NBFT_ENTRY_COUNT=${count}"
+    local i=0 mac iface proto vlan ipaddr prefix netmask gateway dns1 dns2 dhcp
+    while [ "$i" -lt "$count" ]; do
+        mac="$(echo "$json" | "${JQ}" -r ".[].hfi[] | select(. != null) | .mac_addr" | sed -n "$((i + 1))p")"
+        # NOTE: the select above is a safe way to walk a flat hfi list;
+        # fields below use the same positional approach.
+        ipaddr="$(echo "$json" | "${JQ}" -r ".[].hfi[] | select(. != null) | .ipaddr" | sed -n "$((i + 1))p")"
+        prefix="$(echo "$json" | "${JQ}" -r ".[].hfi[] | select(. != null) | .subnet_mask_prefix" | sed -n "$((i + 1))p")"
+        gateway="$(echo "$json" | "${JQ}" -r ".[].hfi[] | select(. != null) | .gateway_ipaddr" | sed -n "$((i + 1))p")"
+        dns1="$(echo "$json" | "${JQ}" -r ".[].hfi[] | select(. != null) | .primary_dns_ipaddr" | sed -n "$((i + 1))p")"
+        dns2="$(echo "$json" | "${JQ}" -r ".[].hfi[] | select(. != null) | .secondary_dns_ipaddr" | sed -n "$((i + 1))p")"
+        vlan="$(echo "$json" | "${JQ}" -r ".[].hfi[] | select(. != null) | .vlan" | sed -n "$((i + 1))p")"
+        dhcp="$(echo "$json" | "${JQ}" -r ".[].hfi[] | select(. != null) | .dhcp_server_ipaddr" | sed -n "$((i + 1))p")"
+
+        [ "$mac" = "null" ] && mac=
+        [ "$ipaddr" = "null" ] && ipaddr=
+        [ "$gateway" = "null" ] && gateway=
+        [ "$dns1" = "null" ] && dns1=
+        [ "$dns2" = "null" ] && dns2=
+        [ "$dhcp" = "null" ] && dhcp=
+        mac="$(normalize_mac "$mac")"
+        case "$vlan" in
+        null | 0 | "") vlan= ;;
+        esac
+        # subnet_mask_prefix may be null in DHCP-only records
+        case "$prefix" in
+        null | "") prefix= ;;
+        esac
+
+        # Determine protocol: dhcp_server_ipaddr set means DHCP;
+        # an IPv6-looking address means dhcp6.
+        if [ -n "$dhcp" ]; then
+            case "$dhcp" in
+            *:*)
+                proto=dhcp6
+                ;;
+            *.*.*.*)
+                proto=dhcp
+                ;;
+            *)
+                warn "invalid dhcp_server_ipaddr: $dhcp"
+                proto=dhcp
+                ;;
+            esac
+        else
+            proto=static
+        fi
+
+        iface="$(ifname_by_mac "$(normalize_mac "$mac")")" || iface=
+        netmask=
+        if [ -n "$prefix" ] && [ "$proto" = "static" ]; then
+            netmask="$(prefix_to_netmask "$prefix")" || netmask=
+        fi
+
+        echo "NBFT_IFACE_${i}='${iface}'"
+        echo "NBFT_MAC_${i}='${mac}'"
+        echo "NBFT_PROTO_${i}='${proto}'"
+        echo "NBFT_VLAN_${i}='${vlan}'"
+        echo "NBFT_IP_${i}='${ipaddr}'"
+        echo "NBFT_PREFIX_${i}='${prefix}'"
+        echo "NBFT_NETMASK_${i}='${netmask}'"
+        echo "NBFT_GATEWAY_${i}='${gateway}'"
+        echo "NBFT_DNS0_${i}='${dns1}'"
+        echo "NBFT_DNS1_${i}='${dns2}'"
+        i=$((i + 1))
+    done
+}
+
+# Connect the NBFT-defined subsystems.  Called by the adapter after the
+# network is up; the connection itself is idempotent.
+do_connect() {
+    detect_nbft || return 0
+    if connect_all_nbft_supported; then
+        log "running: nvme connect-all --nbft"
+        "${NVME}" connect-all --nbft
+    else
+        warn "nvme-cli too old for connect-all --nbft; trying connect-nbft"
+        "${NVME}" connect-nbft
+    fi
+}
+
+# --- main -------------------------------------------------------------------
+
+usage() {
+    cat <<EOF
+Usage: nbft-connect [options]
+
+Framework-independent NBFT (NVMe Boot Firmware Table) consumer core.
+
+Options:
+  --connect          connect the NBFT-defined subsystems (nvme connect-all --nbft)
+  --entries          print parsed NBFT records (default)
+  --json             print raw \`nvme nbft show -H -o json\` output
+  --selftest         run the helper-function self-test and exit
+  --quiet            suppress warnings
+  --verbose          log progress to stderr
+  -h, --help         show this help
+
+Environment:
+  NBFT_SYSFS_PATH    path to the kernel ACPI table export (default: /sys/firmware/acpi/tables)
+EOF
+}
+
+ACTION=entries
+VERBOSE=0
+QUIET=0
+while [ $# -gt 0 ]; do
+    case "$1" in
+    --connect) ACTION=connect ;;
+    --entries) ACTION=entries ;;
+    --json) ACTION=json ;;
+    --selftest) ACTION=selftest ;;
+    --verbose) VERBOSE=1 ;;
+    --quiet) QUIET=1 ;;
+    -h | --help) usage; exit 0 ;;
+    *) warn "unknown option: $1"; usage; exit 2 ;;
+    esac
+    shift
+done
+[ "$QUIET" -eq 1 ] && VERBOSE=0
+
+case "$ACTION" in
+selftest)
+    selftest
+    ;;
+entries)
+    detect_nbft || exit 0
+    print_entries
+    ;;
+json)
+    detect_nbft || exit 0
+    "${NVME}" nbft show -H -o json
+    ;;
+connect)
+    do_connect
+    ;;
+esac

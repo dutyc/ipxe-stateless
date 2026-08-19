@@ -1,0 +1,133 @@
+#!/bin/sh
+# initramfs-tools local-top script for the NBFT (NVMe Boot Firmware Table)
+# consumer.  Seed implementation; the kernel parameter `nbft_auto` enables
+# automatic NBFT-based network and NVMe-oF configuration, mirroring
+# open-iscsi's `iscsi_auto` for iBFT (see initramfs-nbft/README).
+
+PREREQ=""
+
+prereqs()
+{
+	echo "$PREREQ"
+}
+
+case $1 in
+# get pre-requisites
+prereqs)
+	prereqs
+	exit 0
+	;;
+esac
+
+. /scripts/functions
+. /conf/initramfs.conf
+for conf in conf/conf.d/*; do
+	[ -f "${conf}" ] && . "${conf}"
+done
+
+NBFT_AUTO=
+for x in $(cat /proc/cmdline); do
+	case ${x} in
+	nbft_auto)
+		NBFT_AUTO=1
+		;;
+	esac
+done
+
+# Only act when explicitly enabled (nbft_auto), like iscsi_auto.
+[ -n "${NBFT_AUTO}" ] || exit 0
+[ -x /usr/local/sbin/nbft-connect ] || exit 0
+[ -e /sys/firmware/acpi/tables/NBFT ] || exit 0
+
+udevadm settle
+
+# 1. Parse the NBFT tables into per-HFI records.
+eval "$(/usr/local/sbin/nbft-connect)" || exit 1
+
+[ "${NBFT_ENTRY_COUNT:-0}" -gt 0 ] 2>/dev/null || exit 0
+
+# 2. Apply network configuration.
+#    DHCP entries are left to configure_networking (dhcpcd/ipconfig).
+#    Static entries are applied here and recorded in /run/net-<iface>.conf
+#    so that configure_networking treats networking as done -- the same
+#    pattern as open-iscsi's local-top/iscsi for iBFT.
+i=0
+DEVICE=
+while [ "$i" -lt "${NBFT_ENTRY_COUNT}" ] ; do
+	eval "iface=\$NBFT_IFACE_${i}"
+	eval "mac=\$NBFT_MAC_${i}"
+	eval "proto=\$NBFT_PROTO_${i}"
+	eval "vlan=\$NBFT_VLAN_${i}"
+	eval "ipaddr=\$NBFT_IP_${i}"
+	eval "prefix=\$NBFT_PREFIX_${i}"
+	eval "netmask=\$NBFT_NETMASK_${i}"
+	eval "gateway=\$NBFT_GATEWAY_${i}"
+	eval "dns0=\$NBFT_DNS0_${i}"
+	eval "dns1=\$NBFT_DNS1_${i}"
+
+	if [ -n "${vlan}" ] ; then
+		echo "nbft: WARNING: VLAN ${iface}.${vlan} not supported yet, skipping entry" >&2
+		i=$((i + 1))
+		continue
+	fi
+
+	if [ -z "${iface}" ] ; then
+		echo "nbft: WARNING: no interface for MAC ${mac}, skipping entry" >&2
+		i=$((i + 1))
+		continue
+	fi
+
+	if [ "${proto}" = "static" ] && [ -n "${ipaddr}" ] ; then
+		# Apply the static address from the NBFT table.
+		if [ -n "${prefix}" ] ; then
+			ip link set dev "${iface}" up
+			ip addr add "${ipaddr}/${prefix}" dev "${iface}" 2>/dev/null || \
+				ip addr add "${ipaddr}" netmask "${netmask}" dev "${iface}" 2>/dev/null || \
+				echo "nbft: WARNING: failed to configure ${ipaddr} on ${iface}" >&2
+			if [ -n "${gateway}" ] && [ "${gateway}" != "0.0.0.0" ] ; then
+				ip route add default via "${gateway}" 2>/dev/null || :
+			fi
+		fi
+		# Record the configuration in the format used by ipconfig/dhcpcd,
+		# so configure_networking marks networking as done.
+		{
+			echo "DEVICE='${iface}'"
+			echo "PROTO='static'"
+			echo "IPV4ADDR='${ipaddr}'"
+			echo "IPV4BROADCAST=''"
+			echo "IPV4NETMASK='${netmask}'"
+			echo "IPV4GATEWAY='${gateway}'"
+			echo "IPV4DNS0='${dns0}'"
+			echo "IPV4DNS1='${dns1}'"
+			echo "HOSTNAME=''"
+			echo "DNSDOMAIN=''"
+			echo "NISDOMAIN=''"
+			echo "ROOTSERVER=''"
+			echo "ROOTPATH=''"
+			echo "UPTIME='0'"
+			echo "DHCPLEASETIME='0'"
+			echo "DOMAINSEARCH=''"
+		} > "/run/net-${iface}.conf"
+	fi
+
+	if [ -z "${DEVICE}" ] ; then
+		DEVICE="${iface}"
+	fi
+	i=$((i + 1))
+done
+
+# 3. configure_networking waits for the device and runs DHCP for entries
+#    without a static configuration.
+configure_networking
+
+# 4. Connect the NBFT-defined NVMe-oF subsystems.
+/usr/local/sbin/nbft-connect --connect
+
+udevadm settle
+
+# Record the interface used for boot, like open-iscsi does.
+if [ -n "${DEVICE}" ] && [ ! -e /run/initramfs/nvmeof.interface ] ; then
+	echo "${DEVICE}" > /run/initramfs/nvmeof.interface
+fi
+
+exit 0
