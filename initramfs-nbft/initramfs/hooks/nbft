@@ -30,8 +30,12 @@ fi
 . /usr/share/initramfs-tools/hook-functions
 
 # NBFT consumer core (framework-independent seed)
+# NOTE: initramfs-tools 0.148 copy_file treats the copy_exec destdir as a
+# directory only if it already exists under DESTDIR or the argument ends
+# with '/'; otherwise the source is copied *as* the named file.  Trailing
+# slashes keep the copy landing in the directory unconditionally.
 if [ -x /usr/local/sbin/nbft-connect ] ; then
-	copy_exec /usr/local/sbin/nbft-connect /usr/local/sbin
+	copy_exec /usr/local/sbin/nbft-connect /usr/local/sbin/
 else
 	echo "nbft hook: nbft-connect not found, skipping" >&2
 	exit 0
@@ -40,13 +44,13 @@ fi
 # nvme-cli provides `nbft show` (parse) and `connect-all --nbft` (connect)
 NVME_BIN="$(command -v nvme 2>/dev/null || echo /usr/sbin/nvme)"
 if [ -x "$NVME_BIN" ] ; then
-	copy_exec "$NVME_BIN" "${NVME_BIN%/*}"
+	copy_exec "$NVME_BIN" "${NVME_BIN%/*}/"
 fi
 
 # jq is required to parse `nvme nbft show -o json`
 JQ_BIN="$(command -v jq 2>/dev/null || echo /usr/bin/jq)"
 if [ -x "$JQ_BIN" ] ; then
-	copy_exec "$JQ_BIN" "${JQ_BIN%/*}"
+	copy_exec "$JQ_BIN" "${JQ_BIN%/*}/"
 fi
 
 for x in nvme_fabrics nvme_tcp; do

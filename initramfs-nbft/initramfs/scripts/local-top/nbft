@@ -120,7 +120,15 @@ done
 #    without a static configuration.
 configure_networking
 
-# 4. Connect the NBFT-defined NVMe-oF subsystems.
+# 4. Load the NVMe/TCP transport.  The kernel only probes fabrics when a
+#    connection is attempted, so nvme-core/fabrics/tcp are still absent:
+#    without them `nvme connect-all --nbft` fails its topology scan
+#    (nvme_scan() -> ENOENT on /sys/class/nvme).  nvme-tcp pulls in the
+#    core and fabrics dependencies via modules.dep.
+modprobe -q nvme-tcp 2>/dev/null || modprobe -q nvme_tcp 2>/dev/null || \
+        echo "nbft: WARNING: nvme-tcp module not found" >&2
+
+# 5. Connect the NBFT-defined NVMe-oF subsystems.
 /usr/local/sbin/nbft-connect --connect
 
 udevadm settle

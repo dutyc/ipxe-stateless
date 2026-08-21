@@ -42,8 +42,22 @@ detect_nbft() {
 }
 
 # Normalize a MAC address to lowercase colon-separated form.
+# The initramfs ships no tr/sed, so the conversion is done in plain POSIX sh
+# (input from sysfs and libnvme is already lowercase colon-separated; this
+# only normalizes exotic upper/dash forms).
 normalize_mac() {
-    echo "$1" | tr 'A-F' 'a-f' | tr -- '- ' '::'
+    local s="$1" out= c
+    while [ -n "$s" ]; do
+        c=${s%"${s#?}"}
+        s=${s#?}
+        case "$c" in
+        A) c=a ;; B) c=b ;; C) c=c ;;
+        D) c=d ;; E) c=e ;; F) c=f ;;
+        '-') c=':' ;;
+        esac
+        out="${out}${c}"
+    done
+    echo "$out"
 }
 
 # Resolve the kernel interface name for a MAC address, if present.
@@ -87,12 +101,13 @@ prefix_to_netmask() {
 }
 
 # Version gate: does this nvme-cli support `connect-all --nbft`?
-# (Same technique as SUSE 95nvmf nvmf-autoconnect.sh.)
+# (Same technique as SUSE 95nvmf nvmf-autoconnect.sh; the initramfs has no
+# sed/grep, so a plain case match over the help text is used instead.)
 connect_all_nbft_supported() {
-    "${NVME}" connect-all --help 2>&1 |
-        sed -n '/[[:space:]]--nbft[[:space:]]/q1;$q0' \
-            && return 1
-    return 0
+    case "$("${NVME}" connect-all --help 2>&1)" in
+    *--nbft*) return 0 ;;
+    *) return 1 ;;
+    esac
 }
 
 # Self-test of the pure helper functions (no NBFT table required).
@@ -159,16 +174,17 @@ print_entries() {
     echo "NBFT_ENTRY_COUNT=${count}"
     local i=0 mac iface proto vlan ipaddr prefix netmask gateway dns1 dns2 dhcp
     while [ "$i" -lt "$count" ]; do
-        mac="$(echo "$json" | "${JQ}" -r ".[].hfi[] | select(. != null) | .mac_addr" | sed -n "$((i + 1))p")"
+        mac="$(echo "$json" | "${JQ}" -r "[ .[] | .hfi[] | select(. != null) ][$i] | .mac_addr")"
         # NOTE: the select above is a safe way to walk a flat hfi list;
-        # fields below use the same positional approach.
-        ipaddr="$(echo "$json" | "${JQ}" -r ".[].hfi[] | select(. != null) | .ipaddr" | sed -n "$((i + 1))p")"
-        prefix="$(echo "$json" | "${JQ}" -r ".[].hfi[] | select(. != null) | .subnet_mask_prefix" | sed -n "$((i + 1))p")"
-        gateway="$(echo "$json" | "${JQ}" -r ".[].hfi[] | select(. != null) | .gateway_ipaddr" | sed -n "$((i + 1))p")"
-        dns1="$(echo "$json" | "${JQ}" -r ".[].hfi[] | select(. != null) | .primary_dns_ipaddr" | sed -n "$((i + 1))p")"
-        dns2="$(echo "$json" | "${JQ}" -r ".[].hfi[] | select(. != null) | .secondary_dns_ipaddr" | sed -n "$((i + 1))p")"
-        vlan="$(echo "$json" | "${JQ}" -r ".[].hfi[] | select(. != null) | .vlan" | sed -n "$((i + 1))p")"
-        dhcp="$(echo "$json" | "${JQ}" -r ".[].hfi[] | select(. != null) | .dhcp_server_ipaddr" | sed -n "$((i + 1))p")"
+        # fields below use the same positional approach (jq array index
+        # replaces sed -n, which is not available in the initramfs).
+        ipaddr="$(echo "$json" | "${JQ}" -r "[ .[] | .hfi[] | select(. != null) ][$i] | .ipaddr")"
+        prefix="$(echo "$json" | "${JQ}" -r "[ .[] | .hfi[] | select(. != null) ][$i] | .subnet_mask_prefix")"
+        gateway="$(echo "$json" | "${JQ}" -r "[ .[] | .hfi[] | select(. != null) ][$i] | .gateway_ipaddr")"
+        dns1="$(echo "$json" | "${JQ}" -r "[ .[] | .hfi[] | select(. != null) ][$i] | .primary_dns_ipaddr")"
+        dns2="$(echo "$json" | "${JQ}" -r "[ .[] | .hfi[] | select(. != null) ][$i] | .secondary_dns_ipaddr")"
+        vlan="$(echo "$json" | "${JQ}" -r "[ .[] | .hfi[] | select(. != null) ][$i] | .vlan")"
+        dhcp="$(echo "$json" | "${JQ}" -r "[ .[] | .hfi[] | select(. != null) ][$i] | .dhcp_server_ipaddr")"
 
         [ "$mac" = "null" ] && mac=
         [ "$ipaddr" = "null" ] && ipaddr=
