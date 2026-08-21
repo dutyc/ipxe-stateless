@@ -55,8 +55,13 @@ modprobe nvmet 2>/dev/null || true
 modprobe nvmet_tcp
 
 echo "==> Backing file"
-truncate -s 512M "$IMG"
-# Note: make a bootable disk first with: bash test/make-grub-bootdisk.sh
+# Create the backing file only if missing; the disk image itself is built
+# by test/make-grub-bootdisk.sh (512M validation disk) or
+# test/make-debian-san-disk.sh (2G SAN boot disk).  truncate -s would
+# otherwise truncate an existing larger image.
+if [ ! -e "$IMG" ]; then
+        truncate -s 2G "$IMG"
+fi
 
 echo "==> Removing stale config"
 rm -f "$PORT/subsystems/$NQN"
