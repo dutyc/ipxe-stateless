@@ -43,6 +43,13 @@ esp_start = 2048                            # 8 MiB
 esp_sectors = 300 * 1024 * 1024 // sector  # 76800 x 4K sectors (> 65525 FAT32 min)
 esp_end = esp_start + esp_sectors - 1
 
+def guid_bytes(u):
+    # GPT GUIDs are stored mixed-endian: the first three components are
+    # little-endian (EFI spec).  Writing a UUID string as plain hex would
+    # read back with those fields byte-swapped.
+    b = bytes.fromhex(u)
+    return b[3::-1] + b[5:3:-1] + b[7:5:-1] + b[8:]
+
 # Protective MBR (LBA0)
 mbr = bytearray(sector)
 mbr[0x1BE + 4] = 0xEE                      # partition type 0xEE
@@ -59,15 +66,15 @@ header[24:32] = struct.pack('<Q', 1)             # current LBA
 header[32:40] = struct.pack('<Q', sectors - 1)   # backup LBA
 header[40:48] = struct.pack('<Q', first_usable)
 header[48:56] = struct.pack('<Q', last_usable)
-header[56:72] = bytes.fromhex('4dc45c6de8a6bf47b0b0009e0c71d2c1')  # disk GUID
+header[56:72] = guid_bytes('4dc45c6de8a6bf47b0b0009e0c71d2c1')  # disk GUID
 header[72:80] = struct.pack('<Q', 2)             # partition entry LBA
 header[80:84] = struct.pack('<I', 128)           # entries
 header[84:88] = struct.pack('<I', 128)           # entry size
 
 # Partition table (LBA2-5): one ESP entry
 part = bytearray(128 * 128)
-part[0:16] = bytes.fromhex('28732ac1f81f11d2ba4b00a0c93ec93b')  # ESP type GUID
-part[16:32] = bytes.fromhex('00a0c9e1933e4b88b8d1e2a90d1c2e3f')  # unique GUID
+part[0:16] = guid_bytes('c12a7328f81f11d2ba4b00a0c93ec93b')  # ESP type GUID
+part[16:32] = guid_bytes('00a0c9e1933e4b88b8d1e2a90d1c2e3f')  # unique GUID
 part[32:40] = struct.pack('<Q', esp_start)
 part[40:48] = struct.pack('<Q', esp_end)
 part[48:56] = struct.pack('<Q', 0)               # attributes
@@ -83,12 +90,15 @@ with open(path, 'r+b') as f:
     f.write(header)
     f.seek(2 * sector)
     f.write(part)
-    # Backup GPT: partition table immediately before backup header
-    f.seek((sectors - 5) * sector)
+    # Backup GPT: partition table at canonical location last_usable+1
+    # (EDK2 PartitionDxe cross-checks it there; sectors-5 would leave
+    # zeroes at that LBA and fail the CRC check).
+    f.seek((last_usable + 1) * sector)
     f.write(part)
     f.seek((sectors - 1) * sector)
     header[24:32] = struct.pack('<Q', sectors - 1)  # current LBA = backup
     header[32:40] = struct.pack('<Q', 1)            # backup LBA = LBA1
+    header[72:80] = struct.pack('<Q', last_usable + 1)  # backup table LBA
     header[16:20] = struct.pack('<I', 0)
     header[16:20] = struct.pack('<I', zlib.crc32(header))
     f.write(header)
