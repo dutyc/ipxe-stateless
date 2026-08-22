@@ -2,7 +2,7 @@
 
 [English](customizations.md) | [中文](customizations.zh-CN.md)
 
-本仓库相对上游 iPXE 基线（默认 `e6e51ccb`）的全部定制 = **五个补丁** + **构建级 EMBED 定制**（`embed/auto.ipxe`，经 `EMBED=` 编译进固件，非补丁）：
+本仓库相对上游 iPXE 基线（默认 `e6e51ccb`）的全部定制 = **十个补丁** + **构建级 EMBED 定制**（`embed/auto.ipxe`，经 `EMBED=` 编译进固件，非补丁）：
 
 | # | 补丁 | 内容 |
 |---|---|---|
@@ -11,6 +11,11 @@
 | 0003 | `0003-snponly-local-boot.patch` | snponly 本地引导支持 |
 | 0004 | `0004-realtek-8126-adaptation.patch` | RTL8126（5G）native 驱动适配 |
 | 0005 | `0005-device-info-collection.patch` | 设备信息采集：SMBIOS type 17 内存设置（`mem-total` / `mem-type` / `mem-speed`）+ PCI 设备表名经 `${net0/chip}` 暴露 |
+| 0006 | `0006-nvmeof-adaptation.patch` | NVMe-oF（NVMe over TCP）SAN 协议支持 |
+| 0007 | `0007-nvmetcp-auth-fix.patch` | NVMe/TCP 认证与状态机修复 |
+| 0008 | `0008-efi-nvs-backend.patch` | EFI 变量 NVS 后端（`device-key` / `server-fingerprint` 重启保留） |
+| 0009 | `0009-tofu-fingerprint.patch` | TOFU 指纹链路（首次接触 TLS 放行、指纹存储） |
+| 0010 | `0010-devicekey-commands.patch` | 设备身份密钥命令（`keygen` / `pubkey` / `sign`） |
 
 ## 设计动机
 
@@ -99,6 +104,32 @@ dist/（十个固件产物 + SHA256SUMS）
   - Identify NS 的 LBAF 偏移修正（64→128）
 - **排障日志**：完整调查时间线与 wire 层证据见 [nvmeof-auth-debug-log.md](nvmeof-auth-debug-log.md)。
 - **验证**：全链路复跑：`sending Property Set (CC)` 出现、wire 层全部命令 `status=0x0000`、`0x8018` 出现 0 次、GRUB 2.14 SAN 引导成功。
+
+### 8. EFI 变量 NVS 后端（`0008`）
+
+- **背景**：设备信任根体系需要在非易失存储中保存设备身份密钥与服务端证书指纹；iPXE 默认 NVS 后端（PCI option ROM、SMBIOS）在 EFI 引导路径上缺失或只读，需要基于 EFI NVRAM 变量的专用后端。
+- **修改**：`src/interface/efi/efi_nvs.c`、`src/config/config_efi.c`、`src/include/ipxe/dhcp.h`（`DHCP_EB_DEVICE_KEY` 0x5e、`DHCP_EB_SERVER_FINGERPRINT` 0x5f）、`src/include/ipxe/errfile.h`
+  - 新增 `efi_nvs.c` 设置后端：单个 EFI NVRAM 变量（项目命名空间 GUID）承载整个 options 块；store/load/delete 钩子接入 EFI 设置机制
+  - `device-key` 与 `server-fingerprint` 因此重启保留
+- **验证**：QEMU/OVMF 两轮测试——第 2 轮（保留 NVRAM）密钥仍存在且无需重新生成；`keygen` 拒绝覆盖。
+
+### 9. TOFU 指纹链路（`0009`）
+
+- **背景**：信任根体系需在首次接触时容忍自签或未受信任的 HTTPS 服务器（注册窗口），此后固定该服务器；上游 iPXE 无 trust-on-first-use 机制。
+- **修改**：`src/net/tofu.c`、`src/include/ipxe/tofu.h`、`src/net/tls.c`、`src/include/ipxe/errfile.h`
+  - `tofu_fingerprint_present()` / `tofu_store()`：TLS 叶子证书的 SHA-256 指纹，镜像至 `trust` 设置
+  - `tls_validator_done()`：校验失败时，若尚未存有指纹则接受握手并记录指纹（TOFU）；一旦存在指纹，后续任何失败均致命
+- **验证**：在 0008 基础上补丁双向应用通过。
+
+### 10. 设备身份密钥命令（`0010`）
+
+- **背景**：信任根体系要求设备侧完成 ECDSA P-256 密钥生成、公钥导出与签名——私钥永不出设备。
+- **修改**：`src/hci/commands/devicekey_cmd.c`、`src/config/general.h`（`DEVICEKEY_CMD`）、`src/config/config.c`（`REQUIRE_OBJECT ( devicekey_cmd )`）、`src/include/ipxe/dhcp.h`（`DHCP_EB_PUBKEY` 0x60、`DHCP_EB_SIG` 0x61）、`src/include/ipxe/errfile.h`
+  - `keygen`：DRBG（以 EFI RNG 熵源为种子）生成 32 字节 P-256 私钥并存入 `device-key`；拒绝覆盖已存在的密钥
+  - `pubkey`：经 P-256 曲线乘法推导未压缩点（`0x04‖X‖Y`，130 hex）
+  - `sign`：数据（参数拼接）SHA-256 摘要 → ECDSA P-256 → base64(DER) 签名，同时存入 `sig` 设置供脚本使用
+- **验证**：QEMU/OVMF 两轮——第 1 轮（清空 NVRAM）：keygen/pubkey/sign 全部成功；主机侧（OpenSSL/python）对打印的公钥与签名独立验签通过（PREHASHED 与 REHASH）；第 2 轮（保留 NVRAM）：keygen 拒绝覆盖，pubkey/sign 输出与第 1 轮完全一致（持久化验证）。
+- **授权**：ipxe-stateless 自研实现，`FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL )`。
 
 ## EMBED 自动引导脚本
 

@@ -2,7 +2,7 @@
 
 [English](customizations.md) | [中文](customizations.zh-CN.md)
 
-Every customization in this repository, relative to the upstream iPXE baseline (default `e6e51ccb`), consists of **five patches** plus a **build-level EMBED customization** (`embed/auto.ipxe`, compiled into the firmware via `EMBED=`, not a patch).
+Every customization in this repository, relative to the upstream iPXE baseline (default `e6e51ccb`), consists of **ten patches** plus a **build-level EMBED customization** (`embed/auto.ipxe`, compiled into the firmware via `EMBED=`, not a patch).
 
 | # | Patch | Scope |
 |---|---|---|
@@ -11,6 +11,11 @@ Every customization in this repository, relative to the upstream iPXE baseline (
 | 0003 | `0003-snponly-local-boot.patch` | snponly local boot support |
 | 0004 | `0004-realtek-8126-adaptation.patch` | RTL8126 (5G) native driver adaptation |
 | 0005 | `0005-device-info-collection.patch` | Device info collection: SMBIOS type 17 memory settings (`mem-total` / `mem-type` / `mem-speed`) + PCI device-table name via `${net0/chip}` |
+| 0006 | `0006-nvmeof-adaptation.patch` | NVMe-oF (NVMe over TCP) SAN protocol support |
+| 0007 | `0007-nvmetcp-auth-fix.patch` | NVMe/TCP authentication and state-machine fixes |
+| 0008 | `0008-efi-nvs-backend.patch` | EFI variable NVS backend (`device-key` / `server-fingerprint` persist across reboot) |
+| 0009 | `0009-tofu-fingerprint.patch` | TOFU fingerprint chain (first-contact TLS acceptance, fingerprint storage) |
+| 0010 | `0010-devicekey-commands.patch` | Device identity key commands (`keygen` / `pubkey` / `sign`) |
 
 ## Design Rationale
 
@@ -99,6 +104,32 @@ All patches are generated against the **same pinned upstream baseline**; upgradi
   - Identify NS LBAF offset fix (64→128)
 - **Debug log**: full investigation timeline with wire-level evidence in [nvmeof-auth-debug-log.md](nvmeof-auth-debug-log.md) (Chinese only).
 - **Verification**: re-run of the full chain: `sending Property Set (CC)` present, all commands `status=0x0000` on the wire, `0x8018` zero occurrences, GRUB 2.14 SAN boot OK.
+
+### 8. EFI variable NVS backend (`0008`)
+
+- **Rationale**: the device trust-root scheme needs non-volatile storage for the device identity key and the server certificate fingerprint. iPXE's default NVS backends (PCI option ROM, SMBIOS) are absent or read-only in the EFI boot path, so a dedicated backend backed by an EFI NVRAM variable is required.
+- **Changes**: `src/interface/efi/efi_nvs.c`, `src/config/config_efi.c`, `src/include/ipxe/dhcp.h` (`DHCP_EB_DEVICE_KEY` 0x5e, `DHCP_EB_SERVER_FINGERPRINT` 0x5f), `src/include/ipxe/errfile.h`
+  - New `efi_nvs.c` settings backend: one EFI NVRAM variable (project namespace GUID) holds the whole options block; store/load/delete hooks wired into the EFI settings machinery
+  - `device-key` and `server-fingerprint` therefore survive reboot
+- **Verification**: QEMU/OVMF two-round test — round 2 (kept NVRAM) shows the key still present without regeneration; `keygen` refuses to overwrite.
+
+### 9. TOFU fingerprint chain (`0009`)
+
+- **Rationale**: the trust-root scheme must tolerate self-signed or otherwise-untrusted HTTPS servers on first contact (registration window), then pin the server thereafter. Upstream iPXE has no trust-on-first-use mechanism.
+- **Changes**: `src/net/tofu.c`, `src/include/ipxe/tofu.h`, `src/net/tls.c`, `src/include/ipxe/errfile.h`
+  - `tofu_fingerprint_present()` / `tofu_store()`: SHA-256 fingerprint of the TLS leaf certificate, mirrored into the `trust` setting
+  - `tls_validator_done()`: on validation failure, if no fingerprint is stored yet, accept the handshake and record the fingerprint (TOFU); once a fingerprint exists, any later failure is fatal
+- **Verification**: patch applies bidirectionally on the 0008-based tree.
+
+### 10. Device identity key commands (`0010`)
+
+- **Rationale**: the trust-root scheme requires device-side ECDSA P-256 key generation, public-key export and signing — the private key must never leave the device.
+- **Changes**: `src/hci/commands/devicekey_cmd.c`, `src/config/general.h` (`DEVICEKEY_CMD`), `src/config/config.c` (`REQUIRE_OBJECT ( devicekey_cmd )`), `src/include/ipxe/dhcp.h` (`DHCP_EB_PUBKEY` 0x60, `DHCP_EB_SIG` 0x61), `src/include/ipxe/errfile.h`
+  - `keygen`: DRBG (seeded from the EFI RNG entropy source) generates a 32-byte P-256 private key, stored into `device-key`; refuses to overwrite an existing key
+  - `pubkey`: derives the uncompressed point (`0x04‖X‖Y`, 130 hex) via P-256 curve multiplication
+  - `sign`: SHA-256 digest of the data (arguments concatenated) → ECDSA P-256 → base64(DER) signature, also stored in the `sig` setting for scripts
+- **Verification**: QEMU/OVMF two rounds — round 1 (clean NVRAM): keygen/pubkey/sign all succeed; host-side independent verification (OpenSSL/python) of the printed public key and signature passes (PREHASHED and REHASH); round 2 (kept NVRAM): keygen refuses to overwrite, pubkey/sign output identical to round 1 (persistence proven).
+- **Licence**: original ipxe-stateless implementation, `FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL )`.
 
 ## EMBED Auto-Boot Script
 

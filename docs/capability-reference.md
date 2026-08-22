@@ -350,6 +350,7 @@ I/O queue established → == GRUB BOOTED FROM NVME/TCP SAN DISK ==
 | [nvmeof-usage.md](nvmeof-usage.md) | 使用指南（服务端配置、sanboot 用法、QEMU 验证） |
 | [nvmeof-test-procedure.md](nvmeof-test-procedure.md) | test/ 脚本完整测试流程 |
 | [customizations.zh-CN.md](customizations.zh-CN.md) | 补丁 0005/0006/0007 设计与实现 |
+| [device-trust-usage.md](device-trust-usage.md) | 设备信任根能力使用说明（0008-0010：keygen/pubkey/sign、TOFU、NVRAM 设置） |
 | [nvmeof-auth-debug-log.md](nvmeof-auth-debug-log.md) | 认证排障全历程（0x8018 根因、wire 证据） |
 | [nvmeof-research.md](nvmeof-research.md) | 协议研究与设计 |
 | [nvmeof-san-boot-verification.md](nvmeof-san-boot-verification.md) | 无认证 SAN 引导验证记录 |
