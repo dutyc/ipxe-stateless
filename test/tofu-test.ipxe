@@ -1,0 +1,13 @@
+#!ipxe
+# TOFU verification round: fetch a file from the HTTPS server.
+# Outcome depends on NVRAM state and the server certificate:
+#   round 1 (empty NVRAM): handshake accepted, fingerprint stored
+#   round 2 (same NVRAM):  fingerprint matches, download OK
+#   round 3 (cert B):      fingerprint mismatch, download rejected
+dhcp net0 || goto fail
+imgfetch https://10.0.2.2:8443/test.txt || goto fail
+echo TOFU-FETCH-OK
+exit
+:fail
+echo TOFU-FETCH-FAIL
+exit
